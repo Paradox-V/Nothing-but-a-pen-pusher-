@@ -1,0 +1,32 @@
+scheduler:
+  news_interval: 600
+  hotlist_interval: 300
+  rss_interval: 1800
+  purge_days: 7
+
+hotlist:
+  platforms:
+    - weibo
+    - zhihu
+    - bilibili-hot-search
+    - toutiao
+    - baidu
+    - wallstreetcn-hot
+    - thepaper
+    - cls-hot
+    - ifeng
+    - douyin
+    - tieba
+  api_url: "https://newsnow.busiyi.world/api/s"
+
+ai:
+  enabled: false
+  model: "deepseek/deepseek-chat"
+  api_key: ""
+  base_url: ""
+  interests: ""
+
+vector:
+  model: "BAAI/bge-small-zh-v1.5"
+  dedup_threshold: 0.78
+  cluster_threshold: 0.85

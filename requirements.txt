@@ -1,0 +1,8 @@
+flask>=3.0
+httpx>=0.27
+requests>=2.31
+feedparser>=6.0
+chromadb>=0.4
+sentence-transformers>=2.2
+pyyaml>=6.0
+litellm>=1.0
