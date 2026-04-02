@@ -1,0 +1,1228 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>信源汇总</title>
+<style>
+  :root {
+    --bg: #0f1117; --card: #1a1d27; --border: #2a2d3a;
+    --fg: #e1e4ea; --muted: #8b8fa3; --accent: #4f8ff7;
+    --green: #34d399; --red: #f87171; --orange: #fbbf24;
+    --tag-bg: #262a3a; --purple: #a78bfa;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family:"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    background:var(--bg); color:var(--fg); line-height:1.6;
+  }
+
+  /* ── Header ─────────────────────────────────── */
+  .header {
+    background:linear-gradient(135deg,#1a1d27,#141622);
+    border-bottom:1px solid var(--border);
+    padding:16px 32px; position:sticky; top:0; z-index:100;
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .header-left { display:flex; align-items:center; gap:16px; }
+  .header h1 { font-size:20px; font-weight:700; }
+  .header .meta { color:var(--muted); font-size:13px; }
+  .header .meta span { margin-right:16px; }
+  .btn-refresh {
+    padding:6px 16px; background:var(--card);
+    border:1px solid var(--border); border-radius:6px;
+    color:var(--fg); font-size:13px; cursor:pointer;
+    transition:border-color .2s, color .2s;
+  }
+  .btn-refresh:hover { border-color:var(--accent); color:var(--accent); }
+  .btn-refresh:disabled { opacity:.5; cursor:not-allowed; }
+  .btn-refresh.fetching { color:var(--orange); border-color:var(--orange); }
+
+  /* ── Tab navigation ─────────────────────────── */
+  .tab-nav {
+    display:flex; gap:0; border-bottom:1px solid var(--border);
+    padding:0 32px; background:var(--bg);
+  }
+  .tab-btn {
+    padding:12px 24px; background:transparent; border:none;
+    border-bottom:2px solid transparent; color:var(--muted);
+    font-size:14px; cursor:pointer; font-weight:500;
+    transition:color .2s, border-color .2s;
+  }
+  .tab-btn:hover { color:var(--fg); }
+  .tab-btn.active { color:var(--accent); border-bottom-color:var(--accent); }
+
+  /* ── Tab content ────────────────────────────── */
+  .tab-panel { display:none; }
+  .tab-panel.active { display:block; }
+
+  /* ── Controls / filter bar ──────────────────── */
+  .controls {
+    display:flex; gap:12px; align-items:center;
+    padding:12px 32px; border-bottom:1px solid var(--border); flex-wrap:wrap;
+  }
+  .search-wrap {
+    display:flex; flex:1; min-width:200px; position:relative;
+  }
+  .search-wrap input {
+    flex:1; padding:8px 40px 8px 14px;
+    background:var(--card); border:1px solid var(--border);
+    border-radius:6px; color:var(--fg); font-size:14px; outline:none;
+  }
+  .search-wrap input:focus { border-color:var(--accent); }
+  .search-btn {
+    position:absolute; right:4px; top:50%; transform:translateY(-50%);
+    background:none; border:none; color:var(--muted); font-size:18px;
+    cursor:pointer; padding:4px 8px; line-height:1;
+  }
+  .search-btn:hover { color:var(--accent); }
+  .controls select, .controls button {
+    padding:8px 16px; background:var(--card);
+    border:1px solid var(--border); border-radius:6px;
+    color:var(--fg); font-size:14px; cursor:pointer;
+  }
+  .controls button:hover { border-color:var(--accent); color:var(--accent); }
+
+  /* ── Semantic search toggle ─────────────────── */
+  .search-mode-toggle {
+    display:flex; align-items:center; gap:6px; font-size:13px; color:var(--muted);
+  }
+  .search-mode-toggle label { cursor:pointer; }
+  .search-mode-toggle input[type="checkbox"] { cursor:pointer; }
+
+  /* ── Category bar ───────────────────────────── */
+  .category-bar {
+    display:flex; gap:8px; padding:12px 32px; flex-wrap:wrap;
+    border-bottom:1px solid var(--border);
+  }
+  .cat-pill {
+    display:flex; align-items:center; gap:4px;
+    background:var(--card); border:1px solid var(--border);
+    border-radius:20px; padding:4px 12px; font-size:12px;
+    cursor:pointer; transition:all .2s;
+  }
+  .cat-pill:hover { border-color:var(--accent); color:var(--accent); }
+  .cat-pill.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .cat-pill .cnt { color:var(--muted); font-size:11px; }
+  .cat-pill.active .cnt { color:rgba(255,255,255,0.7); }
+
+  /* ── Source bar ─────────────────────────────── */
+  .source-row {
+    display:flex; align-items:flex-start; gap:16px; padding:12px 32px;
+    border-bottom:1px solid var(--border); flex-wrap:wrap;
+  }
+  .source-pills { display:flex; gap:8px; flex-wrap:wrap; flex:1; }
+
+  /* ── Date range slider ──────────────────────── */
+  .date-range-wrap {
+    display:flex; flex-direction:column; gap:4px; min-width:220px; max-width:280px;
+    padding-top:2px;
+  }
+  .date-label {
+    text-align:center; font-size:12px; color:var(--accent); font-weight:500;
+    min-height:18px;
+  }
+  .range-slider {
+    position:relative; height:20px; user-select:none; touch-action:none;
+  }
+  .range-track {
+    position:absolute; top:8px; left:0; right:0; height:4px;
+    background:var(--border); border-radius:2px;
+  }
+  .range-fill {
+    position:absolute; top:8px; height:4px;
+    background:var(--accent); border-radius:2px;
+  }
+  .range-thumb {
+    position:absolute; top:2px; width:16px; height:16px;
+    background:var(--fg); border:2px solid var(--accent);
+    border-radius:50%; cursor:grab; z-index:2;
+    transition:transform .1s;
+  }
+  .range-thumb:hover { transform:scale(1.2); }
+  .range-thumb:active { cursor:grabbing; transform:scale(1.3); }
+  .range-ticks {
+    display:flex; justify-content:space-between;
+    font-size:10px; color:var(--muted); padding:0 4px;
+  }
+
+  /* ── News cards ─────────────────────────────── */
+  .news-grid { display:flex; flex-direction:column; gap:10px; padding:0 32px 40px; }
+  .news-card {
+    background:var(--card); border:1px solid var(--border);
+    border-radius:8px; padding:16px 20px; transition:border-color .2s;
+  }
+  .news-card:hover { border-color:var(--accent); }
+  .news-card .top-row {
+    display:flex; align-items:center; gap:10px; margin-bottom:8px; flex-wrap:wrap;
+  }
+  .news-card .source-badge {
+    background:var(--tag-bg); padding:2px 10px;
+    border-radius:12px; font-size:12px; color:var(--accent); white-space:nowrap;
+  }
+  .news-card .cat-badge {
+    background:#1a2a3a; padding:2px 10px;
+    border-radius:12px; font-size:12px; color:var(--purple); white-space:nowrap;
+  }
+  .news-card .similarity-badge {
+    background:#1a3a1a; padding:2px 10px;
+    border-radius:12px; font-size:12px; color:var(--green); white-space:nowrap;
+  }
+  .news-card .timestamp { color:var(--muted); font-size:12px; }
+  .news-card .title { font-size:15px; font-weight:600; margin-bottom:6px; }
+  .news-card .content {
+    font-size:14px; color:var(--muted); line-height:1.7;
+    display:-webkit-box; -webkit-line-clamp:3;
+    -webkit-box-orient:vertical; overflow:hidden;
+  }
+  .news-card.expanded .content { -webkit-line-clamp:unset; overflow:auto; }
+  .news-card .bottom-row {
+    display:flex; align-items:center; gap:8px; margin-top:8px;
+  }
+  .news-card .tag {
+    background:var(--tag-bg); padding:2px 8px;
+    border-radius:4px; font-size:11px; color:var(--muted);
+  }
+  .news-card .link {
+    font-size:12px; color:var(--accent); text-decoration:none; margin-left:auto;
+  }
+  .news-card .link:hover { text-decoration:underline; }
+
+  /* ── Hotlist cards ──────────────────────────── */
+  .hot-card {
+    background:var(--card); border:1px solid var(--border);
+    border-radius:8px; padding:14px 20px; transition:border-color .2s;
+    display:flex; align-items:center; gap:16px;
+  }
+  .hot-card:hover { border-color:var(--accent); }
+  .hot-rank {
+    font-size:20px; font-weight:800; min-width:40px; text-align:center;
+    color:var(--muted);
+  }
+  .hot-rank.top1 { color:#f87171; }
+  .hot-rank.top2 { color:#fbbf24; }
+  .hot-rank.top3 { color:#34d399; }
+  .hot-info { flex:1; min-width:0; }
+  .hot-title { font-size:15px; font-weight:600; margin-bottom:4px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .hot-meta { display:flex; align-items:center; gap:10px; font-size:12px; color:var(--muted); }
+  .hot-platform-badge {
+    background:var(--tag-bg); padding:2px 10px;
+    border-radius:12px; font-size:12px; color:var(--orange); white-space:nowrap;
+  }
+  .hot-score {
+    font-size:13px; color:var(--muted); white-space:nowrap;
+  }
+  .hot-link {
+    font-size:12px; color:var(--accent); text-decoration:none; white-space:nowrap;
+  }
+  .hot-link:hover { text-decoration:underline; }
+
+  /* ── RSS cards ──────────────────────────────── */
+  .rss-card {
+    background:var(--card); border:1px solid var(--border);
+    border-radius:8px; padding:16px 20px; transition:border-color .2s;
+  }
+  .rss-card:hover { border-color:var(--accent); }
+  .rss-card .top-row {
+    display:flex; align-items:center; gap:10px; margin-bottom:8px; flex-wrap:wrap;
+  }
+  .rss-card .feed-badge {
+    background:var(--tag-bg); padding:2px 10px;
+    border-radius:12px; font-size:12px; color:var(--green); white-space:nowrap;
+  }
+  .rss-card .timestamp { color:var(--muted); font-size:12px; }
+  .rss-card .title { font-size:15px; font-weight:600; margin-bottom:6px; }
+  .rss-card .summary {
+    font-size:14px; color:var(--muted); line-height:1.7;
+    display:-webkit-box; -webkit-line-clamp:3;
+    -webkit-box-orient:vertical; overflow:hidden;
+  }
+  .rss-card .link {
+    font-size:12px; color:var(--accent); text-decoration:none; margin-left:auto;
+  }
+  .rss-card .link:hover { text-decoration:underline; }
+
+  /* ── Manage button ──────────────────────────── */
+  .btn-manage {
+    padding:8px 16px; background:var(--card);
+    border:1px solid var(--border); border-radius:6px;
+    color:var(--fg); font-size:13px; cursor:pointer;
+    transition:border-color .2s, color .2s;
+  }
+  .btn-manage:hover { border-color:var(--accent); color:var(--accent); }
+
+  /* ── Modal ──────────────────────────────────── */
+  .modal-overlay {
+    display:none; position:fixed; top:0; left:0; right:0; bottom:0;
+    background:rgba(0,0,0,0.6); z-index:200;
+    align-items:center; justify-content:center;
+  }
+  .modal-overlay.open { display:flex; }
+  .modal {
+    background:var(--card); border:1px solid var(--border);
+    border-radius:12px; padding:24px; width:90%; max-width:800px;
+    max-height:80vh; overflow-y:auto;
+  }
+  .modal-header {
+    display:flex; align-items:center; justify-content:space-between;
+    margin-bottom:16px;
+  }
+  .modal-header h2 { font-size:18px; font-weight:700; }
+  .modal-close {
+    background:none; border:none; color:var(--muted); font-size:24px;
+    cursor:pointer; padding:4px 8px; line-height:1;
+  }
+  .modal-close:hover { color:var(--fg); }
+
+  /* ── Feed table ─────────────────────────────── */
+  .feed-table {
+    width:100%; border-collapse:collapse; font-size:13px;
+  }
+  .feed-table th {
+    text-align:left; padding:8px 12px; border-bottom:1px solid var(--border);
+    color:var(--muted); font-weight:600;
+  }
+  .feed-table td {
+    padding:8px 12px; border-bottom:1px solid var(--border);
+    vertical-align:middle;
+  }
+  .feed-table tr:hover td { background:rgba(255,255,255,0.02); }
+  .feed-status { font-size:16px; }
+  .feed-url {
+    max-width:200px; white-space:nowrap; overflow:hidden;
+    text-overflow:ellipsis; color:var(--muted);
+  }
+  .feed-actions { display:flex; gap:6px; }
+  .feed-actions button {
+    padding:4px 10px; background:var(--tag-bg); border:1px solid var(--border);
+    border-radius:4px; color:var(--fg); font-size:12px; cursor:pointer;
+  }
+  .feed-actions button:hover { border-color:var(--accent); color:var(--accent); }
+  .feed-actions button.btn-del:hover { border-color:var(--red); color:var(--red); }
+
+  /* Toggle switch */
+  .toggle-switch {
+    position:relative; display:inline-block; width:36px; height:20px;
+  }
+  .toggle-switch input { opacity:0; width:0; height:0; }
+  .toggle-slider {
+    position:absolute; top:0; left:0; right:0; bottom:0;
+    background:var(--border); border-radius:10px; cursor:pointer;
+    transition:background .2s;
+  }
+  .toggle-slider::before {
+    content:""; position:absolute; top:2px; left:2px;
+    width:16px; height:16px; background:var(--fg);
+    border-radius:50%; transition:transform .2s;
+  }
+  .toggle-switch input:checked + .toggle-slider { background:var(--accent); }
+  .toggle-switch input:checked + .toggle-slider::before { transform:translateX(16px); }
+
+  /* ── Add feed form ──────────────────────────── */
+  .add-feed-form {
+    display:none; padding:16px; background:var(--bg);
+    border:1px solid var(--border); border-radius:8px;
+    margin-bottom:16px;
+  }
+  .add-feed-form.open { display:block; }
+  .add-feed-form .form-row {
+    display:flex; gap:12px; margin-bottom:12px; align-items:center;
+  }
+  .add-feed-form input {
+    flex:1; padding:8px 14px;
+    background:var(--card); border:1px solid var(--border);
+    border-radius:6px; color:var(--fg); font-size:14px; outline:none;
+  }
+  .add-feed-form input:focus { border-color:var(--accent); }
+  .add-feed-form label {
+    min-width:60px; font-size:13px; color:var(--muted);
+  }
+  .btn-add {
+    padding:8px 20px; background:var(--accent); color:#fff;
+    border:none; border-radius:6px; font-size:13px; font-weight:600;
+    cursor:pointer;
+  }
+  .btn-add:hover { opacity:0.85; }
+  .btn-add:disabled { opacity:0.5; cursor:not-allowed; }
+  .btn-cancel {
+    padding:8px 16px; background:var(--card); color:var(--fg);
+    border:1px solid var(--border); border-radius:6px; font-size:13px;
+    cursor:pointer;
+  }
+  .btn-cancel:hover { border-color:var(--accent); }
+
+  /* ── Empty / Loading ────────────────────────── */
+  .empty-state { text-align:center; padding:80px 20px; color:var(--muted); }
+  .empty-state .icon { font-size:48px; margin-bottom:12px; }
+  .loading { text-align:center; padding:40px; color:var(--muted); }
+  @keyframes spin { to { transform:rotate(360deg); } }
+
+  /* ── Pagination ─────────────────────────────── */
+  .pagination { display:flex; justify-content:center; gap:8px; padding:20px 32px; }
+  .pagination button {
+    padding:6px 14px; background:var(--card);
+    border:1px solid var(--border); border-radius:6px;
+    color:var(--fg); cursor:pointer; font-size:13px;
+  }
+  .pagination button.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .pagination button:disabled { opacity:.4; cursor:not-allowed; }
+
+  /* ── Alert ──────────────────────────────────── */
+  .alert {
+    padding:8px 16px; border-radius:6px; margin-bottom:12px; font-size:13px;
+  }
+  .alert-warn { background:#3a2a1a; color:var(--orange); }
+  .alert-ok { background:#1a3a2a; color:var(--green); }
+  .alert-err { background:#3a1a1a; color:var(--red); }
+</style>
+</head>
+<body>
+
+<!-- ════════════════ Header ════════════════ -->
+<div class="header">
+  <div class="header-left">
+    <h1>信源汇总</h1>
+    <div class="meta" id="headerMeta">加载中...</div>
+  </div>
+  <button class="btn-refresh" id="btnRefresh" onclick="doRefresh()">刷新</button>
+</div>
+
+<!-- ════════════════ Tab Navigation ════════════════ -->
+<div class="tab-nav">
+  <button class="tab-btn active" data-tab="news" onclick="switchTab('news')">新闻汇总</button>
+  <button class="tab-btn" data-tab="hotlist" onclick="switchTab('hotlist')">热榜</button>
+  <button class="tab-btn" data-tab="rss" onclick="switchTab('rss')">RSS订阅</button>
+</div>
+
+<!-- ════════════════ Tab 1: 新闻汇总 ════════════════ -->
+<div class="tab-panel active" id="panel-news">
+  <!-- Search + semantic toggle -->
+  <div class="controls">
+    <div class="search-wrap">
+      <input type="text" id="newsSearchInput" placeholder="搜索标题或内容..." onkeydown="if(event.key==='Enter')doNewsSearch()">
+      <button class="search-btn" onclick="doNewsSearch()" title="搜索">&#128269;</button>
+    </div>
+    <div class="search-mode-toggle">
+      <input type="checkbox" id="semanticToggle">
+      <label for="semanticToggle">语义搜索</label>
+    </div>
+  </div>
+
+  <!-- Category pills -->
+  <div class="category-bar" id="categoryBar"></div>
+
+  <!-- Source pills + date slider -->
+  <div class="source-row" id="sourceRow">
+    <div class="source-pills" id="sourceBar"></div>
+    <div class="date-range-wrap">
+      <span class="date-label" id="dateLabel">全部时间</span>
+      <div class="range-slider" id="rangeSlider">
+        <div class="range-track"></div>
+        <div class="range-fill" id="rangeFill"></div>
+        <div class="range-thumb" id="thumbLeft" data-side="left"></div>
+        <div class="range-thumb" id="thumbRight" data-side="right"></div>
+      </div>
+      <div class="range-ticks">
+        <span>7天前</span><span>5天前</span><span>3天前</span><span>昨天</span><span>今天</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- News list -->
+  <div class="news-grid" id="newsGrid"></div>
+</div>
+
+<!-- ════════════════ Tab 2: 热榜 ════════════════ -->
+<div class="tab-panel" id="panel-hotlist">
+  <div class="controls">
+    <select id="hotPlatformSelect" onchange="hotPage=1;loadHotlist()">
+      <option value="">全部平台</option>
+    </select>
+    <select id="hotHoursSelect" onchange="hotPage=1;loadHotlist()">
+      <option value="6">6 小时内</option>
+      <option value="12">12 小时内</option>
+      <option value="24" selected>24 小时内</option>
+      <option value="48">48 小时内</option>
+      <option value="72">72 小时内</option>
+    </select>
+  </div>
+  <div class="news-grid" id="hotGrid"></div>
+</div>
+
+<!-- ════════════════ Tab 3: RSS订阅 ════════════════ -->
+<div class="tab-panel" id="panel-rss">
+  <div class="controls">
+    <select id="rssFeedSelect" onchange="rssPage=1;loadRSS()">
+      <option value="">全部订阅源</option>
+    </select>
+    <div class="search-wrap">
+      <input type="text" id="rssSearchInput" placeholder="搜索 RSS 条目..." onkeydown="if(event.key==='Enter'){rssPage=1;loadRSS();}">
+      <button class="search-btn" onclick="rssPage=1;loadRSS();" title="搜索">&#128269;</button>
+    </div>
+    <button class="btn-manage" onclick="openFeedModal()">管理订阅源</button>
+  </div>
+  <div class="news-grid" id="rssGrid"></div>
+</div>
+
+<!-- ════════════════ RSS Feed Management Modal ════════════════ -->
+<div class="modal-overlay" id="feedModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>管理 RSS 订阅源</h2>
+      <button class="modal-close" onclick="closeFeedModal()">&times;</button>
+    </div>
+
+    <!-- Add feed form -->
+    <div class="add-feed-form" id="addFeedForm">
+      <div class="form-row">
+        <label>名称</label>
+        <input type="text" id="newFeedName" placeholder="例如: Hacker News">
+      </div>
+      <div class="form-row">
+        <label>URL</label>
+        <input type="text" id="newFeedUrl" placeholder="https://example.com/feed.xml">
+      </div>
+      <div class="form-row" style="justify-content:flex-end;">
+        <button class="btn-cancel" onclick="closeAddForm()">取消</button>
+        <button class="btn-add" id="btnAddFeed" onclick="addFeed()">添加</button>
+      </div>
+    </div>
+
+    <button class="btn-add" id="btnShowAddForm" onclick="showAddForm()" style="margin-bottom:12px;">+ 添加订阅源</button>
+
+    <!-- Feed table -->
+    <table class="feed-table">
+      <thead>
+        <tr>
+          <th>名称</th>
+          <th>URL</th>
+          <th>状态</th>
+          <th>启用</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="feedTableBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ════════════════ JavaScript ════════════════ -->
+<script>
+// ── Global state ─────────────────────────────
+const PER_PAGE = 30;
+let currentTab = 'news';
+
+// News state
+let newsPage = 1;
+let newsTotal = 0;
+let newsSearchTimer = null;
+let activeCategories = new Set();
+let activeSources = new Set();
+let allSources = [];
+const SLIDER_DAYS = 7;
+let rangeMin = 0;
+let rangeMax = 7;
+
+// Hotlist state
+let hotPage = 1;
+let hotTotal = 0;
+let hotPlatforms = [];
+
+// RSS state
+let rssPage = 1;
+let rssTotal = 0;
+let rssFeeds = [];
+
+// ── Utility ──────────────────────────────────
+function esc(s) { return s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : ''; }
+
+function renderPagination(container, page, total, perPage, gotoFn) {
+  const totalPages = Math.ceil(total / perPage) || 1;
+  if (totalPages <= 1 && total <= perPage) {
+    // no pagination needed for small result sets
+    return;
+  }
+  const p = document.createElement('div');
+  p.className = 'pagination';
+  p.innerHTML = `
+    <button onclick="${gotoFn}(1)" ${page===1?'disabled':''}>&laquo;</button>
+    <button onclick="${gotoFn}(${page-1})" ${page===1?'disabled':''}>&lsaquo; 上一页</button>
+    <button class="active">${page} / ${totalPages} (共${total}条)</button>
+    <button onclick="${gotoFn}(${page+1})" ${page>=totalPages?'disabled':''}>下一页 &rsaquo;</button>
+    <button onclick="${gotoFn}(${totalPages})" ${page>=totalPages?'disabled':''}>&raquo;</button>`;
+  container.appendChild(p);
+}
+
+// ── Tab switching ────────────────────────────
+function switchTab(tab) {
+  currentTab = tab;
+  // Update buttons
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tab);
+  });
+  // Update panels
+  document.querySelectorAll('.tab-panel').forEach(panel => {
+    panel.classList.toggle('active', panel.id === 'panel-' + tab);
+  });
+  // Load data for the active tab
+  if (tab === 'news') {
+    loadNewsStatus();
+  } else if (tab === 'hotlist') {
+    loadHotlistPlatforms();
+    loadHotlist();
+  } else if (tab === 'rss') {
+    loadRSSFeeds();
+    loadRSS();
+  }
+}
+
+// ── Refresh button (fetch for current tab) ────
+async function doRefresh() {
+  const btn = document.getElementById('btnRefresh');
+  btn.disabled = true;
+  btn.classList.add('fetching');
+  btn.textContent = '刷新中...';
+
+  try {
+    if (currentTab === 'news') {
+      const resp = await fetch('/api/news/fetch', {method: 'POST'});
+      if (!resp.ok) { const d = await resp.json(); throw new Error(d.error || resp.statusText); }
+      const data = await resp.json();
+      newsPage = 1;
+      loadNewsStatus();
+      loadCategories();
+      loadNews();
+    } else if (currentTab === 'hotlist') {
+      const resp = await fetch('/api/hotlist/fetch', {method: 'POST'});
+      if (!resp.ok) { const d = await resp.json(); throw new Error(d.error || resp.statusText); }
+      await resp.json();
+      hotPage = 1;
+      loadHotlistPlatforms();
+      loadHotlist();
+    } else if (currentTab === 'rss') {
+      const resp = await fetch('/api/rss/fetch', {method: 'POST'});
+      if (!resp.ok) { const d = await resp.json(); throw new Error(d.error || resp.statusText); }
+      await resp.json();
+      rssPage = 1;
+      loadRSSFeeds();
+      loadRSS();
+    }
+  } catch(e) {
+    alert('刷新失败: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove('fetching');
+    btn.textContent = '刷新';
+  }
+}
+
+// ══════════════════════════════════════════════
+// TAB 1: 新闻汇总
+// ══════════════════════════════════════════════
+
+// ── Date range slider ────────────────────────
+function initRangeSlider() {
+  const slider = document.getElementById('rangeSlider');
+  const fill = document.getElementById('rangeFill');
+  const thumbL = document.getElementById('thumbLeft');
+  const thumbR = document.getElementById('thumbRight');
+  const W = slider.offsetWidth;
+
+  function posToDay(x) { return Math.round(Math.max(0, Math.min(SLIDER_DAYS, (x / W) * SLIDER_DAYS))); }
+  function dayToPos(d) { return (d / SLIDER_DAYS) * W; }
+
+  function render() {
+    const pL = dayToPos(rangeMin);
+    const pR = dayToPos(rangeMax);
+    thumbL.style.left = (pL - 8) + 'px';
+    thumbR.style.left = (pR - 8) + 'px';
+    fill.style.left = pL + 'px';
+    fill.style.width = (pR - pL) + 'px';
+    updateDateLabel();
+  }
+
+  function updateDateLabel() {
+    if (rangeMin === 0 && rangeMax === SLIDER_DAYS) {
+      document.getElementById('dateLabel').textContent = '全部时间';
+      return;
+    }
+    const from = daysAgoToStr(SLIDER_DAYS - rangeMin);
+    const to = daysAgoToStr(SLIDER_DAYS - rangeMax);
+    document.getElementById('dateLabel').textContent = from + ' 至 ' + to;
+  }
+
+  function daysAgoToStr(daysAgo) {
+    if (daysAgo <= 0) return '今天';
+    if (daysAgo === 1) return '昨天';
+    return daysAgo + '天前';
+  }
+
+  let dragging = null;
+  function onDown(e) {
+    e.preventDefault();
+    const thumb = e.target;
+    dragging = thumb.dataset.side;
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.addEventListener('touchmove', onMove, {passive:false});
+    document.addEventListener('touchend', onUp);
+  }
+  function onMove(e) {
+    if (!dragging) return;
+    e.preventDefault();
+    const rect = slider.getBoundingClientRect();
+    const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+    const day = posToDay(x);
+    if (dragging === 'left') {
+      rangeMin = Math.min(day, rangeMax - 1);
+    } else {
+      rangeMax = Math.max(day, rangeMin + 1);
+    }
+    render();
+  }
+  function onUp() {
+    dragging = null;
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    document.removeEventListener('touchmove', onMove);
+    document.removeEventListener('touchend', onUp);
+    newsPage = 1;
+    loadNews();
+  }
+
+  thumbL.addEventListener('mousedown', onDown);
+  thumbR.addEventListener('mousedown', onDown);
+  thumbL.addEventListener('touchstart', onDown, {passive:false});
+  thumbR.addEventListener('touchstart', onDown, {passive:false});
+  slider.addEventListener('dblclick', () => {
+    rangeMin = 0; rangeMax = SLIDER_DAYS;
+    render();
+    newsPage = 1;
+    loadNews();
+  });
+  render();
+}
+
+function getDateFrom() {
+  if (rangeMin === 0 && rangeMax === SLIDER_DAYS) return null;
+  const d = new Date(); d.setDate(d.getDate() - (SLIDER_DAYS - rangeMin));
+  return d.toISOString().slice(0, 10);
+}
+function getDateTo() {
+  if (rangeMin === 0 && rangeMax === SLIDER_DAYS) return null;
+  const d = new Date(); d.setDate(d.getDate() - (SLIDER_DAYS - rangeMax));
+  return d.toISOString().slice(0, 10);
+}
+
+function doNewsSearch() {
+  newsPage = 1;
+  loadNews();
+}
+
+// ── Categories ───────────────────────────────
+async function loadCategories() {
+  try {
+    const resp = await fetch('/api/news/categories');
+    const cats = await resp.json();
+    const bar = document.getElementById('categoryBar');
+    let html = '<div class="cat-pill' + (activeCategories.size === 0 ? ' active' : '') +
+      '" onclick="clearCategories()">全部</div>';
+    cats.forEach(c => {
+      const isActive = activeCategories.has(c.category);
+      html += '<div class="cat-pill' + (isActive ? ' active' : '') +
+        '" onclick="toggleCategory(\'' + esc(c.category) + '\')">' +
+        esc(c.category) + ' <span class="cnt">' + c.count + '</span></div>';
+    });
+    bar.innerHTML = html;
+  } catch(e) {}
+}
+
+function toggleCategory(cat) {
+  if (activeCategories.has(cat)) activeCategories.delete(cat);
+  else activeCategories.add(cat);
+  newsPage = 1;
+  loadCategories();
+  loadNews();
+}
+function clearCategories() {
+  activeCategories.clear();
+  newsPage = 1;
+  loadCategories();
+  loadNews();
+}
+
+// ── Sources ──────────────────────────────────
+function renderSourceBar(data) {
+  const pills = document.querySelector('.source-pills');
+  if (!pills) return;
+  const stats = data.source_stats || {};
+  allSources = Object.keys(stats);
+  let html = '<div class="cat-pill' + (activeSources.size === 0 ? ' active' : '') +
+    '" onclick="clearSources()">全部信源</div>';
+  for (const [name, count] of Object.entries(stats)) {
+    const isActive = activeSources.has(name);
+    html += '<div class="cat-pill' + (isActive ? ' active' : '') +
+      '" onclick="toggleSource(\'' + esc(name) + '\')">' +
+      esc(name) + ' <span class="cnt">' + count + '</span></div>';
+  }
+  pills.innerHTML = html;
+}
+
+function toggleSource(src) {
+  if (activeSources.has(src)) activeSources.delete(src);
+  else activeSources.add(src);
+  newsPage = 1;
+  loadSourceStats();
+  loadNews();
+}
+function clearSources() {
+  activeSources.clear();
+  newsPage = 1;
+  loadSourceStats();
+  loadNews();
+}
+
+async function loadSourceStats() {
+  try {
+    const resp = await fetch('/api/news/status');
+    const data = await resp.json();
+    renderSourceBar(data);
+  } catch(e) {}
+}
+
+async function loadNewsStatus() {
+  try {
+    const resp = await fetch('/api/news/status');
+    const data = await resp.json();
+    renderSourceBar(data);
+    document.getElementById('headerMeta').innerHTML =
+      '<span>新闻: ' + (data.db_total ?? '-') + ' 条</span>';
+  } catch(e) {}
+}
+
+// ── Load news ────────────────────────────────
+async function loadNews() {
+  const keyword = document.getElementById('newsSearchInput').value.trim();
+  const semantic = document.getElementById('semanticToggle').checked;
+
+  if (semantic && keyword) {
+    await loadSemanticSearch(keyword);
+    return;
+  }
+
+  const params = new URLSearchParams({ page: newsPage, per_page: PER_PAGE });
+  if (keyword) params.set('keyword', keyword);
+  if (activeCategories.size > 0) params.set('categories', [...activeCategories].join(','));
+  if (activeSources.size > 0) params.set('sources', [...activeSources].join(','));
+  const dateFrom = getDateFrom();
+  const dateTo = getDateTo();
+  if (dateFrom) params.set('date_from', dateFrom);
+  if (dateTo) params.set('date_to', dateTo);
+
+  try {
+    const resp = await fetch('/api/news?' + params);
+    const data = await resp.json();
+    newsTotal = data.total;
+    renderNews(data.items);
+  } catch(e) {
+    document.getElementById('newsGrid').innerHTML =
+      '<div class="empty-state"><div class="icon">&#x26A0;</div><div>加载失败: ' + esc(e.message) + '</div></div>';
+  }
+}
+
+async function loadSemanticSearch(query) {
+  const params = new URLSearchParams({ q: query, n: PER_PAGE });
+  if (activeCategories.size > 0) params.set('categories', [...activeCategories].join(','));
+  if (activeSources.size > 0) params.set('sources', [...activeSources].join(','));
+
+  const grid = document.getElementById('newsGrid');
+  grid.innerHTML = '<div class="empty-state"><div class="icon" style="animation:spin 1s linear infinite">&#x2699;</div><div>正在加载语义搜索模型，请稍候...</div></div>';
+
+  try {
+    const resp = await fetch('/api/news/semantic_search?' + params);
+    if (!resp.ok) throw new Error(resp.statusText);
+    const items = await resp.json();
+    if (items.error) throw new Error(items.error);
+    newsTotal = items.length;
+    renderNews(items, true);
+  } catch(e) {
+    document.getElementById('semanticToggle').checked = false;
+    await loadNews();
+    grid.insertAdjacentHTML('afterbegin',
+      '<div class="alert alert-warn">语义搜索暂不可用，已切换为关键词搜索</div>');
+  }
+}
+
+function renderNews(items, showSimilarity = false) {
+  const grid = document.getElementById('newsGrid');
+  grid.innerHTML = '';
+  if (!items || !items.length) {
+    grid.innerHTML = '<div class="empty-state"><div class="icon">&#x1F4ED;</div><div>暂无新闻，点击「刷新」启动采集</div></div>';
+    return;
+  }
+  items.forEach(n => {
+    const tags = (n.tags||[]).map(t => '<span class="tag">' + esc(t) + '</span>').join('');
+    const link = n.url ? '<a class="link" href="' + esc(n.url) + '" target="_blank" rel="noopener">查看原文 &rarr;</a>' : '';
+    const ts = n.timestamp ? n.timestamp.replace('T',' ').slice(0,19) : (n.created_at||'').slice(0,19);
+    const cats = Array.isArray(n.category) ? n.category : (n.category ? [n.category] : []);
+    const catBadges = cats.map(c => '<span class="cat-badge">' + esc(c) + '</span>').join('');
+    const simBadge = (showSimilarity && n.similarity !== undefined)
+      ? '<span class="similarity-badge">' + (n.similarity*100).toFixed(0) + '%</span>' : '';
+    const card = document.createElement('div');
+    card.className = 'news-card';
+    card.innerHTML =
+      '<div class="top-row">' +
+        '<span class="source-badge">' + esc(n.source_name) + '</span>' +
+        catBadges + simBadge +
+        '<span class="timestamp">' + ts + '</span>' +
+      '</div>' +
+      '<div class="title">' + esc(n.title) + '</div>' +
+      '<div class="content">' + esc(n.content) + '</div>' +
+      '<div class="bottom-row">' + tags + link + '</div>';
+    card.addEventListener('click', () => card.classList.toggle('expanded'));
+    grid.appendChild(card);
+  });
+  renderPagination(grid, newsPage, newsTotal, PER_PAGE, 'gotoNews');
+}
+
+function gotoNews(p) {
+  newsPage = p;
+  loadNews();
+  document.getElementById('newsGrid').scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+// ══════════════════════════════════════════════
+// TAB 2: 热榜
+// ══════════════════════════════════════════════
+
+async function loadHotlistPlatforms() {
+  try {
+    const resp = await fetch('/api/hotlist/platforms');
+    hotPlatforms = await resp.json();
+    const sel = document.getElementById('hotPlatformSelect');
+    // Keep current selection
+    const current = sel.value;
+    sel.innerHTML = '<option value="">全部平台</option>';
+    hotPlatforms.forEach(p => {
+      sel.innerHTML += '<option value="' + esc(p.platform) + '">' + esc(p.platform_name) + ' (' + p.count + ')</option>';
+    });
+    sel.value = current;
+  } catch(e) {}
+}
+
+async function loadHotlist() {
+  const grid = document.getElementById('hotGrid');
+  grid.innerHTML = '<div class="loading"><div class="icon" style="animation:spin 1s linear infinite">&#x2699;</div><div>加载中...</div></div>';
+
+  const platform = document.getElementById('hotPlatformSelect').value;
+  const hours = document.getElementById('hotHoursSelect').value;
+
+  const params = new URLSearchParams({
+    page: hotPage, page_size: PER_PAGE, hours: hours,
+  });
+  if (platform) params.set('platform', platform);
+
+  try {
+    const resp = await fetch('/api/hotlist?' + params);
+    const data = await resp.json();
+    hotTotal = data.total;
+    renderHotlist(data.items);
+  } catch(e) {
+    grid.innerHTML = '<div class="empty-state"><div class="icon">&#x26A0;</div><div>加载失败: ' + esc(e.message) + '</div></div>';
+  }
+}
+
+function renderHotlist(items) {
+  const grid = document.getElementById('hotGrid');
+  grid.innerHTML = '';
+  if (!items || !items.length) {
+    grid.innerHTML = '<div class="empty-state"><div class="icon">&#x1F4ED;</div><div>暂无热榜数据</div></div>';
+    return;
+  }
+  items.forEach(item => {
+    const rank = item.hot_rank || 0;
+    let rankClass = '';
+    if (rank === 1) rankClass = 'top1';
+    else if (rank === 2) rankClass = 'top2';
+    else if (rank === 3) rankClass = 'top3';
+
+    const link = item.url ? '<a class="hot-link" href="' + esc(item.url) + '" target="_blank" rel="noopener">查看 &rarr;</a>' : '';
+    const crawlTs = item.crawl_time ? item.crawl_time.slice(0,16).replace('T',' ') : '';
+
+    const card = document.createElement('div');
+    card.className = 'hot-card';
+    card.innerHTML =
+      '<div class="hot-rank ' + rankClass + '">' + rank + '</div>' +
+      '<div class="hot-info">' +
+        '<div class="hot-title">' + esc(item.title) + '</div>' +
+        '<div class="hot-meta">' +
+          '<span class="hot-platform-badge">' + esc(item.platform_name || item.platform) + '</span>' +
+          '<span>热度持续: ' + (item.appear_count || 1) + ' 次</span>' +
+          (item.hot_score ? '<span>热度: ' + esc(item.hot_score) + '</span>' : '') +
+          '<span>' + crawlTs + '</span>' +
+        '</div>' +
+      '</div>' +
+      link;
+    grid.appendChild(card);
+  });
+  renderPagination(grid, hotPage, hotTotal, PER_PAGE, 'gotoHot');
+}
+
+function gotoHot(p) {
+  hotPage = p;
+  loadHotlist();
+  document.getElementById('hotGrid').scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+// ══════════════════════════════════════════════
+// TAB 3: RSS订阅
+// ══════════════════════════════════════════════
+
+async function loadRSSFeeds() {
+  try {
+    const resp = await fetch('/api/rss/feeds');
+    rssFeeds = await resp.json();
+    const sel = document.getElementById('rssFeedSelect');
+    const current = sel.value;
+    sel.innerHTML = '<option value="">全部订阅源</option>';
+    rssFeeds.forEach(f => {
+      sel.innerHTML += '<option value="' + esc(f.id) + '">' + esc(f.name) + '</option>';
+    });
+    sel.value = current;
+  } catch(e) {}
+}
+
+async function loadRSS() {
+  const grid = document.getElementById('rssGrid');
+  grid.innerHTML = '<div class="loading"><div class="icon" style="animation:spin 1s linear infinite">&#x2699;</div><div>加载中...</div></div>';
+
+  const feedId = document.getElementById('rssFeedSelect').value;
+  const params = new URLSearchParams({
+    page: rssPage, page_size: PER_PAGE,
+  });
+  if (feedId) params.set('feed_id', feedId);
+
+  try {
+    const resp = await fetch('/api/rss/items?' + params);
+    const data = await resp.json();
+    rssTotal = data.total;
+    renderRSS(data.items);
+  } catch(e) {
+    grid.innerHTML = '<div class="empty-state"><div class="icon">&#x26A0;</div><div>加载失败: ' + esc(e.message) + '</div></div>';
+  }
+}
+
+function renderRSS(items) {
+  const grid = document.getElementById('rssGrid');
+  grid.innerHTML = '';
+  if (!items || !items.length) {
+    grid.innerHTML = '<div class="empty-state"><div class="icon">&#x1F4ED;</div><div>暂无 RSS 条目</div></div>';
+    return;
+  }
+
+  // Build a feed-name lookup
+  const feedMap = {};
+  rssFeeds.forEach(f => { feedMap[f.id] = f.name; });
+
+  items.forEach(item => {
+    const feedName = feedMap[item.feed_id] || item.feed_id || '';
+    const link = item.url ? '<a class="link" href="' + esc(item.url) + '" target="_blank" rel="noopener">查看原文 &rarr;</a>' : '';
+    const ts = item.published_at
+      ? item.published_at.replace('T',' ').slice(0,16)
+      : (item.crawl_time ? item.crawl_time.replace('T',' ').slice(0,16) : '');
+    const summary = item.summary || '';
+
+    const card = document.createElement('div');
+    card.className = 'rss-card';
+    card.innerHTML =
+      '<div class="top-row">' +
+        '<span class="feed-badge">' + esc(feedName) + '</span>' +
+        '<span class="timestamp">' + ts + '</span>' +
+        link +
+      '</div>' +
+      '<div class="title">' + esc(item.title) + '</div>' +
+      (summary ? '<div class="summary">' + esc(summary) + '</div>' : '');
+    grid.appendChild(card);
+  });
+  renderPagination(grid, rssPage, rssTotal, PER_PAGE, 'gotoRSS');
+}
+
+function gotoRSS(p) {
+  rssPage = p;
+  loadRSS();
+  document.getElementById('rssGrid').scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+// ══════════════════════════════════════════════
+// RSS Feed Management Modal
+// ══════════════════════════════════════════════
+
+function openFeedModal() {
+  document.getElementById('feedModal').classList.add('open');
+  closeAddForm();
+  loadFeedTable();
+}
+
+function closeFeedModal() {
+  document.getElementById('feedModal').classList.remove('open');
+  closeAddForm();
+}
+
+function showAddForm() {
+  document.getElementById('addFeedForm').classList.add('open');
+  document.getElementById('btnShowAddForm').style.display = 'none';
+  document.getElementById('newFeedName').value = '';
+  document.getElementById('newFeedUrl').value = '';
+  document.getElementById('newFeedName').focus();
+}
+
+function closeAddForm() {
+  document.getElementById('addFeedForm').classList.remove('open');
+  document.getElementById('btnShowAddForm').style.display = '';
+}
+
+async function loadFeedTable() {
+  const tbody = document.getElementById('feedTableBody');
+  tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px;">加载中...</td></tr>';
+  try {
+    const resp = await fetch('/api/rss/feeds');
+    const feeds = await resp.json();
+    rssFeeds = feeds; // keep in sync
+    if (!feeds.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px;">暂无订阅源</td></tr>';
+      return;
+    }
+    tbody.innerHTML = '';
+    feeds.forEach(f => {
+      const statusIcon = f.last_error
+        ? '<span class="feed-status" title="' + esc(f.last_error) + '" style="color:var(--red);">&#x26A0;</span>'
+        : '<span class="feed-status" title="正常" style="color:var(--green);">&#x2713;</span>';
+      const lastCrawl = f.last_crawl_time ? f.last_crawl_time.replace('T',' ').slice(0,16) : '-';
+      const tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td><strong>' + esc(f.name) + '</strong><br><span style="font-size:11px;color:var(--muted);">' + lastCrawl + '</span></td>' +
+        '<td class="feed-url" title="' + esc(f.url) + '">' + esc(f.url) + '</td>' +
+        '<td>' + statusIcon + '</td>' +
+        '<td><label class="toggle-switch"><input type="checkbox" ' + (f.enabled ? 'checked' : '') +
+          ' onchange="toggleFeedEnabled(\'' + esc(f.id) + '\', this.checked)">' +
+          '<span class="toggle-slider"></span></label></td>' +
+        '<td><div class="feed-actions">' +
+          '<button onclick="editFeed(\'' + esc(f.id) + '\')">编辑</button>' +
+          '<button class="btn-del" onclick="deleteFeed(\'' + esc(f.id) + '\')">删除</button>' +
+        '</div></td>';
+      tbody.appendChild(tr);
+    });
+  } catch(e) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--red);">加载失败</td></tr>';
+  }
+}
+
+async function addFeed() {
+  const name = document.getElementById('newFeedName').value.trim();
+  const url = document.getElementById('newFeedUrl').value.trim();
+  if (!name || !url) { alert('名称和 URL 为必填项'); return; }
+
+  const btn = document.getElementById('btnAddFeed');
+  btn.disabled = true;
+  btn.textContent = '添加中...';
+
+  try {
+    const resp = await fetch('/api/rss/feeds', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: name, url: url}),
+    });
+    const data = await resp.json();
+    if (!data.success) throw new Error(data.error || '添加失败');
+    closeAddForm();
+    loadFeedTable();
+    loadRSSFeeds();
+  } catch(e) {
+    alert('添加失败: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '添加';
+  }
+}
+
+async function editFeed(feedId) {
+  const feed = rssFeeds.find(f => f.id === feedId);
+  if (!feed) return;
+  const newName = prompt('编辑订阅源名称:', feed.name);
+  if (newName === null) return;
+  const trimmedName = newName.trim();
+  if (!trimmedName) { alert('名称不能为空'); return; }
+
+  try {
+    const resp = await fetch('/api/rss/feeds/' + feedId, {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: trimmedName}),
+    });
+    const data = await resp.json();
+    if (!data.success) throw new Error(data.error || '更新失败');
+    loadFeedTable();
+    loadRSSFeeds();
+  } catch(e) {
+    alert('更新失败: ' + e.message);
+  }
+}
+
+async function deleteFeed(feedId) {
+  if (!confirm('确定删除此订阅源及其所有条目？')) return;
+  try {
+    const resp = await fetch('/api/rss/feeds/' + feedId, {method: 'DELETE'});
+    const data = await resp.json();
+    if (!data.success) throw new Error(data.error || '删除失败');
+    loadFeedTable();
+    loadRSSFeeds();
+  } catch(e) {
+    alert('删除失败: ' + e.message);
+  }
+}
+
+async function toggleFeedEnabled(feedId, enabled) {
+  try {
+    const resp = await fetch('/api/rss/feeds/' + feedId, {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({enabled: enabled ? 1 : 0}),
+    });
+    const data = await resp.json();
+    if (!data.success) {
+      // Revert checkbox on failure
+      const cb = document.querySelector('input[onchange*="' + feedId + '"]');
+      if (cb) cb.checked = !enabled;
+      throw new Error(data.error || '更新失败');
+    }
+  } catch(e) {
+    alert('更新失败: ' + e.message);
+  }
+}
+
+// ══════════════════════════════════════════════
+// Initialization
+// ══════════════════════════════════════════════
+
+(async function init() {
+  // Load global status
+  try {
+    const resp = await fetch('/api/status');
+    const data = await resp.json();
+    let metaHtml = '';
+    if (data.news && data.news.available) metaHtml += '<span>新闻: ' + data.news.count + ' 条</span>';
+    if (data.hotlist && data.hotlist.available) metaHtml += '<span>热榜: ' + (data.hotlist.last_crawl || '-') + '</span>';
+    if (data.rss && data.rss.available) metaHtml += '<span>RSS: ' + data.rss.feed_count + ' 源</span>';
+    document.getElementById('headerMeta').innerHTML = metaHtml;
+  } catch(e) {}
+
+  // Initialize news tab
+  initRangeSlider();
+  loadNewsStatus();
+  loadCategories();
+  loadNews();
+})();
+</script>
+</body>
+</html>
