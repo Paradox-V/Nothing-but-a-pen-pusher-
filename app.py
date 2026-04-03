@@ -5,12 +5,24 @@
 """
 import webbrowser
 from flask import Flask, render_template, jsonify
+from utils.config import load_config
 from modules.news.routes import news_bp
 from modules.hotlist.routes import hotlist_bp
 from modules.rss.routes import rss_bp
 
 app = Flask(__name__)
 app.config["JSON_AS_ASCII"] = False  # 中文不转义
+
+# 加载全局配置
+_config = load_config()
+if _config:
+    proxy_url = _config.get("proxy", {}).get("url")
+    if proxy_url:
+        app.config["PROXY_URL"] = proxy_url
+
+    rsshub_cfg = _config.get("rsshub", {})
+    if rsshub_cfg:
+        app.config["RSSHUB_CONFIG"] = rsshub_cfg
 
 # 注册 Blueprint
 app.register_blueprint(news_bp)

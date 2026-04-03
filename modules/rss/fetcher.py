@@ -30,15 +30,20 @@ class RSSFeedConfig:
 class RSSFetcher:
     """RSS 抓取器"""
 
-    def __init__(self, timeout: int = 15):
+    def __init__(self, timeout: int = 15, proxy_url: Optional[str] = None):
         """
         初始化抓取器
 
         Args:
             timeout: 请求超时（秒）
+            proxy_url: 代理地址（如 http://127.0.0.1:7890），None 则不使用代理
         """
         self.timeout = timeout
         self.parser = RSSParser()
+        self.proxies = (
+            {"http": proxy_url, "https": proxy_url}
+            if proxy_url else None
+        )
         self.session = self._create_session()
 
     def _create_session(self) -> requests.Session:
@@ -51,6 +56,8 @@ class RSSFetcher:
                       "application/xml, text/xml, */*",
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         })
+        # 禁用环境变量代理，代理按请求级别显式传入
+        session.trust_env = False
         return session
 
     def fetch_feed(
@@ -67,10 +74,30 @@ class RSSFetcher:
             每个条目字典包含: title, feed_id, url, author, summary, published_at
         """
         try:
-            response = self.session.get(feed_config.url, timeout=self.timeout)
+            is_local = feed_config.url.startswith(("http://127.0.0.1", "http://localhost"))
+            if is_local:
+                # 本地地址（如 RSSHub Docker 容器）直接请求
+                response = self.session.get(
+                    feed_config.url, timeout=self.timeout, proxies=None
+                )
+            else:
+                # 外部地址：先直连（5s 超时），失败再走代理
+                try:
+                    response = self.session.get(
+                        feed_config.url, timeout=5, proxies=None
+                    )
+                except (requests.Timeout, requests.ConnectionError):
+                    if self.proxies:
+                        response = self.session.get(
+                            feed_config.url, timeout=self.timeout,
+                            proxies=self.proxies
+                        )
+                    else:
+                        raise
             response.raise_for_status()
 
-            parsed_items = self.parser.parse(response.text, feed_config.url)
+            # 使用 bytes 而非 str，避免含非法 UTF-8 代理字符的响应（如 Arxiv RSS）
+            parsed_items = self.parser.parse(response.content, feed_config.url)
 
             # 限制条目数量（0=不限制）
             if feed_config.max_items > 0:

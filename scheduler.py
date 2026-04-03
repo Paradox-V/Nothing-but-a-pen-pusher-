@@ -2,13 +2,17 @@
 统一调度器 - 独立进程运行
 
 定时调度三个模块的数据采集：新闻、热榜、RSS
+同时提供内部向量搜索 API（端口 5001），供 Web 进程调用
 """
 import json
 import logging
 import os
 import sqlite3
+import threading
 import time
 from datetime import datetime
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
 
 # 离线模式：跳过 HuggingFace 网络检查
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
@@ -28,6 +32,67 @@ logging.basicConfig(
     format="%(asctime)s [scheduler] %(levelname)s %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+# ── 内部向量 API ─────────────────────────────────────────────
+
+VECTOR_API_PORT = 5001
+
+
+class _VectorAPIHandler(BaseHTTPRequestHandler):
+    """轻量 HTTP 处理器，代理 scheduler 已加载的向量引擎"""
+
+    vector_engine: NewsVectorEngine | None = None
+
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        if parsed.path == "/semantic_search":
+            self._handle_search(parsed)
+        elif parsed.path == "/health":
+            self._json({"ok": True, "model_loaded": self.vector_engine is not None})
+        else:
+            self._json({"error": "not found"}, 404)
+
+    def _handle_search(self, parsed):
+        params = parse_qs(parsed.query)
+        query = params.get("q", [""])[0]
+        if not query:
+            self._json([])
+            return
+        if not self.vector_engine:
+            self._json({"error": "向量引擎未初始化"}, 503)
+            return
+
+        n = int(params.get("n", ["20"])[0])
+        cat_raw = params.get("category", [None])[0]
+        src_raw = params.get("source", [None])[0]
+        categories = cat_raw.split(",") if cat_raw else None
+        sources = src_raw.split(",") if src_raw else None
+
+        results = self.vector_engine.semantic_search(
+            query=query, n=n, categories=categories, sources=sources,
+        )
+        self._json(results)
+
+    def _json(self, data, status=200):
+        body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, fmt, *args):
+        logger.debug("VectorAPI: %s", fmt % args)
+
+
+def _start_vector_api(vector_engine):
+    """在后台线程启动向量搜索 API（仅监听 localhost）"""
+    _VectorAPIHandler.vector_engine = vector_engine
+    server = HTTPServer(("127.0.0.1", VECTOR_API_PORT), _VectorAPIHandler)
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    logger.info("向量 API 已启动: http://127.0.0.1:%d", VECTOR_API_PORT)
 
 
 def main():
@@ -64,14 +129,21 @@ def main():
         except Exception as e:
             logger.error("回填失败: %s", e)
 
+    # --- 启动向量搜索内部 API ---
+    if vector_engine:
+        _start_vector_api(vector_engine)
+
+    # --- 代理配置 ---
+    proxy_url = config.get("proxy", {}).get("url")
+
     # --- 热榜模块 ---
     hotlist_db = HotlistDB()
     hotlist_cfg = config.get("hotlist", {})
-    hotlist_fetcher = DataFetcher(api_url=hotlist_cfg.get("api_url"))
+    hotlist_fetcher = DataFetcher(api_url=hotlist_cfg.get("api_url"), proxy_url=proxy_url)
 
     # --- RSS 模块 ---
     rss_db = RSSDB()
-    rss_fetcher = RSSFetcher()
+    rss_fetcher = RSSFetcher(proxy_url=proxy_url)
 
     # 计时器 - 每个模块独立计时
     timers = {"news": 0, "hotlist": 0, "rss": 0}

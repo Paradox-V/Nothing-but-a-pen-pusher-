@@ -3,44 +3,26 @@
 
 从 news_viewer.py 提取的全部 API 路由，
 包括新闻列表、状态查询、语义搜索、分类统计、专题聚合、手动抓取。
+
+注意：向量处理（去重/分类/聚类）由 scheduler 独立进程负责，
+Web 进程默认不加载 Embedding 模型以节省内存（~700MB）。
+设置环境变量 ENABLE_WEB_VECTOR=1 可启用 Web 端向量功能。
 """
 
-import json
 import logging
-import sqlite3
 import threading
 
 from flask import Blueprint, jsonify, request
 
 from modules.news.db import NewsDB
-from modules.news.vector import NewsVectorEngine
 
 logger = logging.getLogger(__name__)
 
 news_bp = Blueprint("news", __name__)
 
 # ── 全局组件 ──────────────────────────────────────────────
-_vector_engine = None  # 延迟加载，避免启动时加载模型
-_vector_lock = threading.Lock()
 _fetching = False
 _fetch_lock = threading.Lock()
-
-
-def _get_vector_engine():
-    """延迟初始化向量引擎（线程安全）。"""
-    global _vector_engine
-    if _vector_engine is None:
-        with _vector_lock:
-            # 双重检查
-            if _vector_engine is None:
-                try:
-                    _vector_engine = NewsVectorEngine()
-                    _vector_engine.initialize()
-                    logger.info("向量引擎加载成功")
-                except Exception as e:
-                    logger.error("向量引擎加载失败: %s", e)
-                    return None
-    return _vector_engine
 
 
 # ── 路由 ──────────────────────────────────────────────────
@@ -92,29 +74,32 @@ def api_status():
 
 @news_bp.route("/api/news/semantic_search")
 def api_semantic_search():
-    """语义搜索：基于向量引擎的相似度检索。"""
+    """语义搜索：代理到 scheduler 内部向量 API，零额外内存。"""
     query = request.args.get("q", "")
     n = request.args.get("n", 20, type=int)
-
-    # 多值 category
-    category = request.args.get("category") or request.args.get("categories")
-    categories = category.split(",") if category else None
-
-    # 多值 source
-    source = request.args.get("source") or request.args.get("sources")
-    sources = source.split(",") if source else None
 
     if not query:
         return jsonify([])
 
-    engine = _get_vector_engine()
-    if not engine:
-        return jsonify({"error": "向量引擎未就绪"}), 503
+    category = request.args.get("category") or request.args.get("categories")
+    source = request.args.get("source") or request.args.get("sources")
 
-    results = engine.semantic_search(
-        query=query, n=n, categories=categories, sources=sources,
-    )
-    return jsonify(results)
+    try:
+        import httpx
+        params = {"q": query, "n": str(n)}
+        if category:
+            params["category"] = category
+        if source:
+            params["source"] = source
+        resp = httpx.get(
+            "http://127.0.0.1:5001/semantic_search",
+            params=params,
+            timeout=30,
+        )
+        return jsonify(resp.json())
+    except Exception as e:
+        logger.error("语义搜索代理失败: %s", e)
+        return jsonify({"error": f"语义搜索服务不可用: {e}"}), 503
 
 
 @news_bp.route("/api/news/categories")
@@ -126,7 +111,7 @@ def api_categories():
 
 @news_bp.route("/api/news/fetch", methods=["POST"])
 def api_fetch():
-    """手动触发新闻采集 + 向量处理管线。"""
+    """手动触发新闻采集。向量处理由 scheduler 在下一周期自动完成。"""
     global _fetching
 
     with _fetch_lock:
@@ -141,18 +126,8 @@ def api_fetch():
         agg = AKSourceAggregator(db=db)
         result = agg.fetch_and_store(purge_days=7)
 
-        # 手动抓取也运行向量处理管线
-        new_items = result.get("new_items", [])
-        new_row_ids = result.get("new_row_ids", [])
-        if new_items:
-            engine = _get_vector_engine()
-            if engine:
-                _run_vector_pipeline(engine, new_items, new_row_ids)
-            if result.get("purged", 0) > 0 and engine:
-                try:
-                    engine.sync_chroma_purge()
-                except Exception:
-                    pass
+        # 向量处理（去重/分类/聚类）由 scheduler 负责，Web 端仅抓取入库
+        result["note"] = "向量处理将由调度器自动完成"
 
         stats = db.get_source_stats()
         return jsonify({
@@ -181,61 +156,3 @@ def api_cluster_detail(cluster_id):
     db = NewsDB()
     items = db.get_cluster_news(cluster_id)
     return jsonify(items)
-
-
-# ── 向量处理管线 ──────────────────────────────────────────
-
-def _run_vector_pipeline(vector_engine, items, row_ids):
-    """向量处理管线：语义去重 → 分类 → 聚类 → ChromaDB 写入。"""
-    db_path = NewsDB().db_path
-    try:
-        deduped = vector_engine.semantic_dedup(items)
-        deduped_set = set()
-        for d in deduped:
-            # 用 (title, content前100字) 作为唯一标识
-            deduped_set.add((d["title"], d.get("content", "")[:100]))
-
-        deduped_items = []
-        deduped_row_ids = []
-        for item, rid in zip(items, row_ids):
-            key = (item["title"], item.get("content", "")[:100])
-            if key in deduped_set:
-                deduped_items.append(item)
-                deduped_row_ids.append(rid)
-
-        # 删除语义重复条目
-        removed_row_ids = [
-            rid for item, rid in zip(items, row_ids)
-            if (item["title"], item.get("content", "")[:100]) not in deduped_set
-        ]
-        if removed_row_ids:
-            conn = sqlite3.connect(db_path)
-            placeholders = ",".join("?" * len(removed_row_ids))
-            conn.execute(
-                f"DELETE FROM news WHERE id IN ({placeholders})",
-                removed_row_ids,
-            )
-            conn.commit()
-            conn.close()
-
-        if not deduped_items:
-            return
-
-        categories = vector_engine.classify_items(deduped_items)
-        cluster_ids = vector_engine.assign_clusters(deduped_items)
-
-        conn = sqlite3.connect(db_path)
-        for rid, cat, cid in zip(deduped_row_ids, categories, cluster_ids):
-            cat_json = json.dumps(cat, ensure_ascii=False) if isinstance(cat, list) else cat
-            conn.execute(
-                "UPDATE news SET category = ?, cluster_id = ? WHERE id = ?",
-                (cat_json, cid, rid),
-            )
-        conn.commit()
-        conn.close()
-
-        vector_engine.upsert_to_chroma(
-            deduped_items, deduped_row_ids, categories, cluster_ids
-        )
-    except Exception as e:
-        logger.error("向量处理管线异常: %s", e)

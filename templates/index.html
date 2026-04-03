@@ -345,6 +345,7 @@
   }
   .btn-add:hover { opacity:0.85; }
   .btn-add:disabled { opacity:0.5; cursor:not-allowed; }
+  .btn-add.fetching { background:var(--orange); }
   .btn-cancel {
     padding:8px 16px; background:var(--card); color:var(--fg);
     border:1px solid var(--border); border-radius:6px; font-size:13px;
@@ -356,6 +357,18 @@
   .empty-state { text-align:center; padding:80px 20px; color:var(--muted); }
   .empty-state .icon { font-size:48px; margin-bottom:12px; }
   .loading { text-align:center; padding:40px; color:var(--muted); }
+
+  /* ── Toast Notice ───────────────────────────── */
+  .toast-notice {
+    position:fixed; bottom:32px; left:50%; transform:translateX(-50%) translateY(20px);
+    padding:10px 24px; border-radius:8px; font-size:14px; font-weight:600;
+    z-index:9999; opacity:0; transition:opacity .3s, transform .3s;
+    pointer-events:none; white-space:nowrap;
+  }
+  .toast-notice.show { opacity:1; transform:translateX(-50%) translateY(0); }
+  .toast-notice.success { background:#065f46; color:#6ee7b7; border:1px solid #10b981; }
+  .toast-notice.error { background:#7f1d1d; color:#fca5a5; border:1px solid #ef4444; }
+  .toast-notice.info { background:#1e3a5f; color:#93c5fd; border:1px solid #3b82f6; }
   @keyframes spin { to { transform:rotate(360deg); } }
 
   /* ── Pagination ─────────────────────────────── */
@@ -486,6 +499,31 @@
       <div class="form-row" style="justify-content:flex-end;">
         <button class="btn-cancel" onclick="closeAddForm()">取消</button>
         <button class="btn-add" id="btnAddFeed" onclick="addFeed()">添加</button>
+      </div>
+    </div>
+
+    <!-- Discover section -->
+    <div class="discover-section" style="margin-bottom:12px;padding:12px;background:var(--bg);border-radius:8px;border:1px solid var(--border);">
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input type="text" id="discoverUrl" placeholder="输入网站地址，如 36kr.com" style="flex:1;padding:6px 10px;background:var(--card);border:1px solid var(--border);border-radius:6px;color:var(--fg);font-size:13px;">
+        <button class="btn-add" id="btnDiscover" onclick="discoverFeeds()" style="white-space:nowrap;">发现</button>
+      </div>
+      <div id="discoverResult" style="margin-top:8px;display:none;"></div>
+      <!-- Custom selector form (hidden by default) -->
+      <div id="customSelectorForm" style="margin-top:8px;display:none;padding:8px;background:var(--card);border-radius:6px;border:1px solid var(--border);">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">自定义 CSS 选择器（适用于未匹配的网站）</div>
+        <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px;">
+          <label style="font-size:12px;width:70px;flex-shrink:0;">条目选择器</label>
+          <input type="text" id="customItemSelector" placeholder="如 article 或 .post" style="flex:1;padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--fg);font-size:12px;">
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <label style="font-size:12px;width:70px;flex-shrink:0;">标题选择器</label>
+          <input type="text" id="customTitleSelector" placeholder="如 h2 或 .title（可选）" style="flex:1;padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--fg);font-size:12px;">
+        </div>
+        <div style="margin-top:6px;display:flex;gap:6px;justify-content:flex-end;">
+          <button class="btn-cancel" onclick="document.getElementById('customSelectorForm').style.display='none'" style="padding:3px 10px;font-size:12px;">取消</button>
+          <button class="btn-add" onclick="customDiscover()" style="padding:3px 10px;font-size:12px;">生成</button>
+        </div>
       </div>
     </div>
 
@@ -1128,6 +1166,7 @@ async function addFeed() {
   btn.textContent = '添加中...';
 
   try {
+    // Step 1: Add feed to database
     const resp = await fetch('/api/rss/feeds', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -1135,14 +1174,42 @@ async function addFeed() {
     });
     const data = await resp.json();
     if (!data.success) throw new Error(data.error || '添加失败');
+
+    // Step 2: Auto-fetch to verify the feed works
+    btn.textContent = '验证并抓取中...';
+    btn.classList.add('fetching');
+    const fetchResp = await fetch('/api/rss/fetch', {method: 'POST'});
+    const fetchData = await fetchResp.json();
+    if (!fetchData.success) {
+      // Feed added but fetch failed - still show it in the list
+      btn.disabled = false;
+      btn.classList.remove('fetching');
+      btn.textContent = '添加';
+      closeAddForm();
+      loadFeedTable();
+      loadRSSFeeds();
+      alert('订阅源已添加，但首次抓取失败: ' + (fetchData.error || '未知错误'));
+      return;
+    }
+
+    // Step 3: Refresh UI
+    btn.disabled = false;
+    btn.classList.remove('fetching');
+    btn.textContent = '添加';
     closeAddForm();
     loadFeedTable();
     loadRSSFeeds();
+    loadRSS();
+
+    // Brief success feedback
+    const totalItems = fetchData.total_items || 0;
+    const feedName = name;
+    showNotice('success', `${feedName} - 已抓取 ${totalItems} 条内容`);
   } catch(e) {
-    alert('添加失败: ' + e.message);
-  } finally {
     btn.disabled = false;
+    btn.classList.remove('fetching');
     btn.textContent = '添加';
+    alert('添加失败: ' + e.message);
   }
 }
 
@@ -1166,6 +1233,182 @@ async function editFeed(feedId) {
     loadRSSFeeds();
   } catch(e) {
     alert('更新失败: ' + e.message);
+  }
+}
+
+// ── RSS Discover ──────────────────────────────────
+
+async function discoverFeeds() {
+  const url = document.getElementById('discoverUrl').value.trim();
+  if (!url) { alert('请输入网站地址'); return; }
+
+  const btn = document.getElementById('btnDiscover');
+  const resultDiv = document.getElementById('discoverResult');
+  btn.disabled = true;
+  btn.textContent = '发现中...';
+  resultDiv.style.display = 'none';
+
+  try {
+    const resp = await fetch('/api/rss/discover', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url: url}),
+    });
+    const data = await resp.json();
+
+    if (!data.success) {
+      let errorHtml = '<div style="color:var(--orange);padding:8px;">' + esc(data.error || '发现失败') + '</div>';
+      if (data.generic_available) {
+        errorHtml += '<div style="padding:4px 8px;"><a href="#" onclick="document.getElementById(\'customSelectorForm\').style.display=\'block\';return false;" style="color:var(--accent);font-size:12px;">使用自定义 CSS 选择器</a></div>';
+      }
+      resultDiv.innerHTML = errorHtml;
+      resultDiv.style.display = 'block';
+      return;
+    }
+
+    // Build result cards
+    let html = '<div style="color:var(--accent);font-weight:600;margin-bottom:8px;">' + esc(data.site_name) + ' - ' + data.routes.length + ' 个可订阅源</div>';
+
+    // Get existing feeds to check for duplicates
+    const feedsResp = await fetch('/api/rss/feeds');
+    const existingFeeds = await feedsResp.json();
+    const existingUrls = new Set(existingFeeds.map(f => f.url));
+
+    data.routes.forEach(route => {
+      const alreadySubscribed = existingUrls.has(route.feed_url);
+      const itemsPreview = (route.sample_items || [])
+        .map(item => '<div style="font-size:12px;color:var(--muted);padding:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(item.title) + '</div>')
+        .join('');
+
+      const feedName = data.site_name + '-' + route.name;
+      // 使用 data 属性传递参数，避免 onclick 拼接中的引号 XSS 问题
+      const subscribeBtn = alreadySubscribed
+        ? '<span style="color:var(--green);font-size:12px;">已订阅</span>'
+        : (route.error
+          ? '<span style="color:var(--red);font-size:12px;">' + esc(route.error) + '</span>'
+          : '<button class="btn-add discover-sub-btn" style="padding:3px 12px;font-size:12px;" data-feed-url="' + esc(route.feed_url) + '" data-feed-name="' + esc(feedName) + '">订阅</button>'
+        );
+
+      html += '<div style="padding:8px;background:var(--card);border-radius:6px;margin-bottom:6px;border:1px solid var(--border);">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+          '<div><strong>' + esc(route.name) + '</strong> <span style="color:var(--muted);font-size:12px;">(' + route.item_count + '条)</span></div>' +
+          subscribeBtn +
+        '</div>' +
+        itemsPreview +
+      '</div>';
+    });
+
+    resultDiv.innerHTML = html;
+    resultDiv.style.display = 'block';
+
+  } catch(e) {
+    resultDiv.innerHTML = '<div style="color:var(--red);padding:8px;">发现失败: ' + esc(e.message) + '</div>';
+    resultDiv.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '发现';
+  }
+}
+
+async function subscribeDiscoverRoute(feedUrl, feedName) {
+  try {
+    const resp = await fetch('/api/rss/feeds', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: feedName, url: feedUrl}),
+    });
+    const data = await resp.json();
+    if (!data.success) throw new Error(data.error || '订阅失败');
+
+    showNotice('success', feedName + ' 订阅成功');
+    loadFeedTable();
+    loadRSSFeeds();
+
+    // Update the clicked button to show "已订阅"
+    const buttons = document.querySelectorAll('#discoverResult .discover-sub-btn');
+    buttons.forEach(btn => {
+      if (btn.dataset.feedUrl === feedUrl) {
+        const span = document.createElement('span');
+        span.style.cssText = 'color:var(--green);font-size:12px;';
+        span.textContent = '已订阅';
+        btn.replaceWith(span);
+      }
+    });
+  } catch(e) {
+    alert('订阅失败: ' + e.message);
+  }
+}
+
+// 事件委托：处理发现区域的订阅按钮点击
+document.addEventListener('click', function(e) {
+  const btn = e.target.closest('.discover-sub-btn');
+  if (btn) {
+    subscribeDiscoverRoute(btn.dataset.feedUrl, btn.dataset.feedName);
+  }
+});
+
+// ── Custom CSS Selector Discover ──────────────────────
+
+async function customDiscover() {
+  const url = document.getElementById('discoverUrl').value.trim();
+  const itemSelector = document.getElementById('customItemSelector').value.trim();
+  const titleSelector = document.getElementById('customTitleSelector').value.trim();
+  if (!url || !itemSelector) { alert('请输入网站地址和条目选择器'); return; }
+
+  const resultDiv = document.getElementById('discoverResult');
+  resultDiv.innerHTML = '<div style="color:var(--muted);padding:8px;">正在生成...</div>';
+  resultDiv.style.display = 'block';
+
+  try {
+    const body = { url: url, item_selector: itemSelector };
+    if (titleSelector) body.title_selector = titleSelector;
+
+    const resp = await fetch('/api/rss/discover/custom', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+
+    if (!data.success) {
+      resultDiv.innerHTML = '<div style="color:var(--orange);padding:8px;">' + esc(data.error || '生成失败') + '</div>';
+      return;
+    }
+
+    // Build result cards (same format as discoverFeeds)
+    let html = '<div style="color:var(--accent);font-weight:600;margin-bottom:8px;">' + esc(data.site_name) + ' - 自定义源</div>';
+
+    const feedsResp = await fetch('/api/rss/feeds');
+    const existingFeeds = await feedsResp.json();
+    const existingUrls = new Set(existingFeeds.map(f => f.url));
+
+    data.routes.forEach(route => {
+      const alreadySubscribed = existingUrls.has(route.feed_url);
+      const itemsPreview = (route.sample_items || [])
+        .map(item => '<div style="font-size:12px;color:var(--muted);padding:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(item.title) + '</div>')
+        .join('');
+
+      const feedName = data.site_name + '-' + route.name;
+      const subscribeBtn = alreadySubscribed
+        ? '<span style="color:var(--green);font-size:12px;">已订阅</span>'
+        : (route.error
+          ? '<span style="color:var(--red);font-size:12px;">' + esc(route.error) + '</span>'
+          : '<button class="btn-add discover-sub-btn" style="padding:3px 12px;font-size:12px;" data-feed-url="' + esc(route.feed_url) + '" data-feed-name="' + esc(feedName) + '">订阅</button>'
+        );
+
+      html += '<div style="padding:8px;background:var(--card);border-radius:6px;margin-bottom:6px;border:1px solid var(--border);">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+          '<div><strong>' + esc(route.name) + '</strong> <span style="color:var(--muted);font-size:12px;">(' + route.item_count + '条)</span></div>' +
+          subscribeBtn +
+        '</div>' +
+        itemsPreview +
+      '</div>';
+    });
+
+    resultDiv.innerHTML = html;
+
+  } catch(e) {
+    resultDiv.innerHTML = '<div style="color:var(--red);padding:8px;">生成失败: ' + esc(e.message) + '</div>';
   }
 }
 
@@ -1223,6 +1466,23 @@ async function toggleFeedEnabled(feedId, enabled) {
   loadCategories();
   loadNews();
 })();
+
+// ── Toast notification ─────────────────────────
+let _toastTimer = null;
+function showNotice(type, msg) {
+  let el = document.getElementById('toastNotice');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'toastNotice';
+    el.className = 'toast-notice';
+    document.body.appendChild(el);
+  }
+  el.className = 'toast-notice ' + type;
+  el.textContent = msg;
+  clearTimeout(_toastTimer);
+  requestAnimationFrame(() => { el.classList.add('show'); });
+  _toastTimer = setTimeout(() => { el.classList.remove('show'); }, 3000);
+}
 </script>
 </body>
 </html>

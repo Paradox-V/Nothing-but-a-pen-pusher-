@@ -9,6 +9,9 @@ AI 客户端模块
 import os
 from typing import Any, Dict, List
 
+# 阻止 litellm 启动时从 GitHub 拉取模型价格表（国内服务器会超时阻塞）
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+
 try:
     from litellm import completion
     HAS_LITELLM = True

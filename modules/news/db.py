@@ -377,7 +377,7 @@ class NewsDB:
 
     def reclassify_all(self, vector_engine=None) -> int:
         """用 Embedding 相似度批量重新分类所有数据。需要传入已初始化的 vector_engine。返回重新分类条数。"""
-        from news_vector import NewsVectorEngine
+        from modules.news.vector import NewsVectorEngine
         conn = self._get_conn()
         try:
             rows = conn.execute("SELECT id, title, content FROM news").fetchall()

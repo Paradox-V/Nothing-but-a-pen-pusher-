@@ -1,4 +1,8 @@
-"""热榜数据库操作"""
+"""热榜数据库操作
+
+存储策略：每个 (title, platform) 只保留一行，每次抓取时 UPSERT 更新。
+避免重复插入导致行数暴涨（旧方案每天上万行）。
+"""
 import os
 import sqlite3
 from datetime import datetime, timedelta
@@ -19,6 +23,22 @@ class HotlistDB:
     def _init_db(self):
         conn = self._get_conn()
         conn.executescript("""
+            CREATE TABLE IF NOT EXISTS crawl_batches (
+                id INTEGER PRIMARY KEY,
+                crawl_time DATETIME NOT NULL,
+                platform_count INTEGER,
+                item_count INTEGER
+            );
+        """)
+
+        # 检测是否需要从旧 schema 迁移（UNIQUE(url, platform, crawl_time) → UNIQUE(title, platform)）
+        table_def = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='hot_items'"
+        ).fetchone()
+        if table_def and "url, platform, crawl_time" in table_def["sql"]:
+            self._migrate_from_v1(conn)
+
+        conn.executescript("""
             CREATE TABLE IF NOT EXISTS hot_items (
                 id INTEGER PRIMARY KEY,
                 title TEXT NOT NULL,
@@ -31,36 +51,72 @@ class HotlistDB:
                 first_time DATETIME,
                 last_time DATETIME,
                 appear_count INTEGER DEFAULT 1,
-                UNIQUE(url, platform, crawl_time)
-            );
-            CREATE TABLE IF NOT EXISTS crawl_batches (
-                id INTEGER PRIMARY KEY,
-                crawl_time DATETIME NOT NULL,
-                platform_count INTEGER,
-                item_count INTEGER
+                UNIQUE(title, platform)
             );
             CREATE INDEX IF NOT EXISTS idx_hot_platform ON hot_items(platform);
             CREATE INDEX IF NOT EXISTS idx_hot_crawl_time ON hot_items(crawl_time);
         """)
         conn.close()
 
+    def _migrate_from_v1(self, conn):
+        """合并旧表中同一 (title, platform) 的多行为一行"""
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS hot_items_new (
+                id INTEGER PRIMARY KEY,
+                title TEXT NOT NULL,
+                url TEXT,
+                platform TEXT NOT NULL,
+                platform_name TEXT,
+                hot_rank INTEGER,
+                hot_score TEXT,
+                crawl_time DATETIME NOT NULL,
+                first_time DATETIME,
+                last_time DATETIME,
+                appear_count INTEGER DEFAULT 1,
+                UNIQUE(title, platform)
+            );
+
+            INSERT OR IGNORE INTO hot_items_new
+                (title, url, platform, platform_name,
+                 hot_rank, hot_score,
+                 crawl_time, first_time, last_time, appear_count)
+            SELECT
+                title, url, platform, platform_name,
+                -- 取最新一次的 rank/score（按 crawl_time 最新的那条）
+                (SELECT hot_rank FROM hot_items h2
+                 WHERE h2.title = h.title AND h2.platform = h.platform
+                 ORDER BY h2.crawl_time DESC LIMIT 1),
+                (SELECT hot_score FROM hot_items h2
+                 WHERE h2.title = h.title AND h2.platform = h.platform
+                 ORDER BY h2.crawl_time DESC LIMIT 1),
+                MAX(crawl_time),
+                MIN(COALESCE(first_time, crawl_time)),
+                MAX(crawl_time),
+                SUM(appear_count)
+            FROM hot_items h
+            GROUP BY title, platform;
+
+            DROP TABLE hot_items;
+            ALTER TABLE hot_items_new RENAME TO hot_items;
+        """)
+
     # ------------------------------------------------------------------
     #  Core write operations
     # ------------------------------------------------------------------
 
     def insert_batch(self, items, crawl_time):
-        """Insert a batch of hot list items.
+        """UPSERT 一批热榜条目。
 
-        For each item, if a row with the same (url, platform) already exists
-        in the table, the NEW row inherits the accumulated ``appear_count``
-        (old count + 1) and the earliest ``first_time``.  The old row's
-        ``last_time`` / ``appear_count`` are **not** modified -- the new row
-        carries the full history forward.
+        同一 (title, platform) 只保留一行：
+        - 首次出现：INSERT
+        - 再次出现：UPDATE hot_rank / hot_score / crawl_time / appear_count
 
         Args:
-            items: iterable of dicts with keys
-                title, url, platform, platform_name, hot_rank, hot_score
-            crawl_time: datetime string or datetime for this crawl run
+            items: dict 列表，每个含 title, url, platform, platform_name, hot_rank, hot_score
+            crawl_time: 抓取时间（字符串或 datetime）
+
+        Returns:
+            实际新增的条目数
         """
         if isinstance(crawl_time, datetime):
             crawl_time = crawl_time.strftime("%Y-%m-%d %H:%M:%S")
@@ -69,7 +125,7 @@ class HotlistDB:
         cur = conn.cursor()
 
         platform_set = set()
-        item_count = 0
+        new_count = 0
 
         try:
             for item in items:
@@ -80,54 +136,38 @@ class HotlistDB:
                 hot_rank = item.get("hot_rank")
                 hot_score = item.get("hot_score", "")
 
+                if not title or not platform:
+                    continue
+
                 platform_set.add(platform)
 
-                # Look for an existing record with the same url+platform to
-                # inherit appear_count / first_time.
-                existing = cur.execute(
+                row_before = cur.execute("SELECT changes()").fetchone()[0]
+                cur.execute(
                     """
-                    SELECT appear_count, first_time
-                    FROM hot_items
-                    WHERE url = ? AND platform = ?
-                    ORDER BY crawl_time DESC
-                    LIMIT 1
+                    INSERT INTO hot_items
+                        (title, url, platform, platform_name,
+                         hot_rank, hot_score,
+                         crawl_time, first_time, last_time, appear_count)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    ON CONFLICT(title, platform) DO UPDATE SET
+                        url = CASE WHEN LENGTH(excluded.url) > LENGTH(hot_items.url)
+                                   OR hot_items.url IS NULL
+                                   THEN excluded.url ELSE hot_items.url END,
+                        hot_rank = excluded.hot_rank,
+                        hot_score = excluded.hot_score,
+                        crawl_time = excluded.crawl_time,
+                        last_time = excluded.crawl_time,
+                        appear_count = hot_items.appear_count + 1
                     """,
-                    (url, platform),
-                ).fetchone()
-
-                if existing:
-                    new_count = existing["appear_count"] + 1
-                    first_time = existing["first_time"]
-                else:
-                    new_count = 1
-                    first_time = crawl_time
-
-                try:
-                    cur.execute(
-                        """
-                        INSERT INTO hot_items
-                            (title, url, platform, platform_name,
-                             hot_rank, hot_score, crawl_time,
-                             first_time, last_time, appear_count)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            title,
-                            url,
-                            platform,
-                            platform_name,
-                            hot_rank,
-                            str(hot_score) if hot_score is not None else "",
-                            crawl_time,
-                            first_time,
-                            crawl_time,
-                            new_count,
-                        ),
-                    )
-                    item_count += 1
-                except sqlite3.IntegrityError:
-                    # UNIQUE(url, platform, crawl_time) duplicate -- skip
-                    pass
+                    (
+                        title, url, platform, platform_name,
+                        hot_rank,
+                        str(hot_score) if hot_score is not None else "",
+                        crawl_time, crawl_time, crawl_time,
+                    ),
+                )
+                if conn.total_changes and conn.total_changes > (row_before or 0):
+                    new_count += 1
 
             # Record the crawl batch
             cur.execute(
@@ -135,10 +175,11 @@ class HotlistDB:
                 INSERT INTO crawl_batches (crawl_time, platform_count, item_count)
                 VALUES (?, ?, ?)
                 """,
-                (crawl_time, len(platform_set), item_count),
+                (crawl_time, len(platform_set), len(items)),
             )
 
             conn.commit()
+            return new_count
         except Exception:
             conn.rollback()
             raise
@@ -150,20 +191,18 @@ class HotlistDB:
     # ------------------------------------------------------------------
 
     def get_items(self, platform=None, hours=24, page=1, page_size=30):
-        """Get paginated hot list items.
+        """分页获取热榜条目。
 
-        For each unique (title, platform) pair only the row with the latest
-        ``crawl_time`` is returned.
+        新 schema 下每个 (title, platform) 只有一行，无需去重。
 
         Args:
-            platform: filter by platform id (optional)
-            hours: look-back window in hours (default 24)
-            page: 1-based page number
-            page_size: rows per page
+            platform: 按平台 ID 过滤（可选）
+            hours: 回溯小时数，默认 24
+            page: 页码，从 1 开始
+            page_size: 每页条数
 
         Returns:
-            dict with keys ``items`` (list of row-dicts), ``total``,
-            ``page``, ``page_size``.
+            {"items": [...], "total": N, "page": N, "page_size": N}
         """
         cutoff = (datetime.now() - timedelta(hours=hours)).strftime(
             "%Y-%m-%d %H:%M:%S"
@@ -172,73 +211,37 @@ class HotlistDB:
 
         conn = self._get_conn()
 
-        # Build the filtered latest-row subquery
-        where_parts = ["hi.crawl_time >= ?"]
+        where_parts = ["crawl_time >= ?"]
         params = [cutoff]
         if platform:
-            where_parts.append("hi.platform = ?")
+            where_parts.append("platform = ?")
             params.append(platform)
-
         where_clause = " AND ".join(where_parts)
 
-        # Count total unique (title, platform) pairs in the window
-        count_row = conn.execute(
-            f"""
-            SELECT COUNT(*) AS cnt
-            FROM hot_items hi
-            WHERE hi.id IN (
-                SELECT h2.id
-                FROM hot_items h2
-                WHERE h2.title = hi.title
-                  AND h2.platform = hi.platform
-                  AND h2.crawl_time >= ?
-                ORDER BY h2.crawl_time DESC
-                LIMIT 1
-            )
-            AND {where_clause}
-            """,
-            [cutoff] + params,
-        ).fetchone()
-        total = count_row["cnt"] if count_row else 0
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM hot_items WHERE {where_clause}", params
+        ).fetchone()[0]
 
-        # Fetch the page of results
         rows = conn.execute(
             f"""
-            SELECT hi.*
-            FROM hot_items hi
-            WHERE hi.id IN (
-                SELECT h2.id
-                FROM hot_items h2
-                WHERE h2.title = hi.title
-                  AND h2.platform = hi.platform
-                  AND h2.crawl_time >= ?
-                ORDER BY h2.crawl_time DESC
-                LIMIT 1
-            )
-            AND {where_clause}
-            ORDER BY hi.platform, hi.hot_rank ASC
+            SELECT * FROM hot_items
+            WHERE {where_clause}
+            ORDER BY platform, hot_rank ASC
             LIMIT ? OFFSET ?
             """,
-            [cutoff] + params + [page_size, offset],
+            params + [page_size, offset],
         ).fetchall()
 
         conn.close()
-
-        items = [dict(r) for r in rows]
         return {
-            "items": items,
+            "items": [dict(r) for r in rows],
             "total": total,
             "page": page,
             "page_size": page_size,
         }
 
     def get_platform_stats(self):
-        """Get per-platform statistics.
-
-        Returns:
-            list of dicts with keys platform, platform_name, item_count,
-            latest_crawl_time.
-        """
+        """每个平台的统计信息"""
         conn = self._get_conn()
         rows = conn.execute(
             """
@@ -256,7 +259,7 @@ class HotlistDB:
         return [dict(r) for r in rows]
 
     def get_last_crawl_time(self):
-        """Return the most recent crawl batch time, or None."""
+        """最近一次抓取时间"""
         conn = self._get_conn()
         row = conn.execute(
             "SELECT crawl_time FROM crawl_batches ORDER BY crawl_time DESC LIMIT 1"
@@ -269,11 +272,7 @@ class HotlistDB:
     # ------------------------------------------------------------------
 
     def purge_old(self, days=7):
-        """Delete items older than *days* days.
-
-        Returns:
-            Number of rows deleted.
-        """
+        """删除 last_time 超过 days 天的条目"""
         cutoff = (datetime.now() - timedelta(days=days)).strftime(
             "%Y-%m-%d %H:%M:%S"
         )

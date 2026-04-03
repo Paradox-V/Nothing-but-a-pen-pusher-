@@ -65,8 +65,9 @@ def fetch_hotlist():
 
     api_url = hotlist_cfg.get("api_url")
     platforms = hotlist_cfg.get("platforms")
+    proxy_url = config.get("proxy", {}).get("url")
 
-    fetcher = DataFetcher(api_url=api_url)
+    fetcher = DataFetcher(api_url=api_url, proxy_url=proxy_url)
     items, failed_ids = fetcher.fetch_all_platforms(platform_ids=platforms)
 
     db = HotlistDB()

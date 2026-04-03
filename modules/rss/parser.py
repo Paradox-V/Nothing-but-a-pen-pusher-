@@ -47,17 +47,21 @@ class RSSParser:
 
         self.max_summary_length = max_summary_length
 
-    def parse(self, content: str, feed_url: str = "") -> List[ParsedRSSItem]:
+    def parse(self, content, feed_url: str = "") -> List[ParsedRSSItem]:
         """
         解析 RSS/Atom/JSON Feed 内容
 
         Args:
-            content: Feed 内容（XML 或 JSON）
+            content: Feed 内容（XML 字符串或字节，feedparser 均支持）
             feed_url: Feed URL（用于错误提示）
 
         Returns:
             解析后的条目列表
         """
+        # 如果是 bytes，统一解码为 str（去除非法代理字符）
+        if isinstance(content, bytes):
+            content = content.decode("utf-8", errors="replace")
+
         # 先尝试检测 JSON Feed
         if self._is_json_feed(content):
             return self._parse_json_feed(content, feed_url)

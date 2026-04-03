@@ -9,6 +9,7 @@ from flask import Blueprint, request, jsonify
 
 from modules.rss.db import RSSDB
 from modules.rss.fetcher import RSSFetcher
+from modules.rss.discover import RSSHubDiscover
 
 rss_bp = Blueprint("rss", __name__)
 
@@ -79,9 +80,9 @@ def add_feed():
     kwargs = {}
     if "format" in data:
         kwargs["format"] = data["format"]
-    if "max_items" in data:
+    if "max_items" in data and data["max_items"] is not None:
         kwargs["max_items"] = int(data["max_items"])
-    if "max_age_days" in data:
+    if "max_age_days" in data and data["max_age_days"] is not None:
         kwargs["max_age_days"] = int(data["max_age_days"])
 
     db = _get_db()
@@ -156,8 +157,67 @@ def fetch_feeds():
     """手动触发 RSS 抓取"""
     try:
         db = _get_db()
-        fetcher = RSSFetcher()
+        from flask import current_app
+        proxy_url = current_app.config.get("PROXY_URL")
+        fetcher = RSSFetcher(proxy_url=proxy_url)
         result = fetcher.fetch_and_store(db)
         return jsonify({"success": True, **result})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ── 站点发现 ──────────────────────────────────────────────
+
+
+@rss_bp.route("/api/rss/discover", methods=["POST"])
+def discover_feed():
+    """根据网站 URL 发现可订阅的 RSS 源"""
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"success": False, "error": "请求体不能为空"}), 400
+
+    url = data.get("url", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "请输入网站地址"}), 400
+
+    from flask import current_app
+
+    rsshub_config = current_app.config.get("RSSHUB_CONFIG", {})
+    if not rsshub_config.get("sites"):
+        return jsonify({"success": False, "error": "RSSHub 未配置"}), 503
+
+    try:
+        discoverer = RSSHubDiscover(rsshub_config)
+        result = discoverer.discover(url)
+        if not result.get("success"):
+            status_code = 503 if "不可用" in result.get("error", "") else 400
+            return jsonify(result), status_code
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@rss_bp.route("/api/rss/discover/custom", methods=["POST"])
+def custom_discover_feed():
+    """使用自定义 CSS 选择器生成 RSS 源"""
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"success": False, "error": "请求体不能为空"}), 400
+
+    url = data.get("url", "").strip()
+    item_selector = data.get("item_selector", "").strip()
+    if not url or not item_selector:
+        return jsonify({"success": False, "error": "url 和 item_selector 为必填项"}), 400
+
+    from flask import current_app
+
+    rsshub_config = current_app.config.get("RSSHUB_CONFIG", {})
+
+    try:
+        discoverer = RSSHubDiscover(rsshub_config)
+        result = discoverer.generic_discover(url, item_selector=item_selector)
+        if not result.get("success"):
+            return jsonify(result), 400
+        return jsonify(result)
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500

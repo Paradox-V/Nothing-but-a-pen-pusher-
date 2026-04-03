@@ -7,3 +7,7 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+news.db
+chroma_db/
+frontend/
+docs/
