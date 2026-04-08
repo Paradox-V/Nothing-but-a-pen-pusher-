@@ -26,6 +26,8 @@ from modules.hotlist.db import HotlistDB
 from modules.hotlist.fetcher import DataFetcher
 from modules.rss.db import RSSDB
 from modules.rss.fetcher import RSSFetcher
+from modules.hotlist.vector import HotlistVectorEngine
+from modules.rss.vector import RSSVectorEngine
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,6 +45,8 @@ class _VectorAPIHandler(BaseHTTPRequestHandler):
     """轻量 HTTP 处理器，代理 scheduler 已加载的向量引擎"""
 
     vector_engine: NewsVectorEngine | None = None
+    hotlist_vector: HotlistVectorEngine | None = None
+    rss_vector: RSSVectorEngine | None = None
 
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -50,6 +54,13 @@ class _VectorAPIHandler(BaseHTTPRequestHandler):
             self._handle_search(parsed)
         elif parsed.path == "/health":
             self._json({"ok": True, "model_loaded": self.vector_engine is not None})
+        else:
+            self._json({"error": "not found"}, 404)
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        if parsed.path == "/chat_search":
+            self._handle_chat_search()
         else:
             self._json({"error": "not found"}, 404)
 
@@ -74,6 +85,70 @@ class _VectorAPIHandler(BaseHTTPRequestHandler):
         )
         self._json(results)
 
+    def _handle_chat_search(self):
+        """多数据源向量搜索，供 QA 问答模块使用。"""
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length == 0:
+            self._json({"error": "empty body"}, 400)
+            return
+        body = self.rfile.read(content_length)
+        try:
+            data = json.loads(body.decode("utf-8"))
+        except Exception:
+            self._json({"error": "invalid JSON"}, 400)
+            return
+
+        query = data.get("query", "")
+        top_k = data.get("top_k", 5)
+        if not query:
+            self._json([])
+            return
+
+        if not self.vector_engine or not self.vector_engine._initialized:
+            self._json({"error": "向量引擎未初始化"}, 503)
+            return
+
+        # 嵌入查询
+        query_emb = self.vector_engine._encode([query])[0]
+
+        # 从 3 个 Collection 检索
+        all_results = []
+
+        # 新闻
+        news_results = self.vector_engine.semantic_search(query, n=top_k)
+        for r in news_results:
+            r["source_type"] = r.get("source_type", "news")
+            all_results.append(r)
+
+        # 热榜
+        if self.hotlist_vector and self.hotlist_vector._initialized:
+            hot_results = self.hotlist_vector.semantic_search(query_emb, top_k=top_k)
+            all_results.extend(hot_results)
+
+        # RSS
+        if self.rss_vector and self.rss_vector._initialized:
+            rss_results = self.rss_vector.semantic_search(query_emb, top_k=top_k)
+            all_results.extend(rss_results)
+
+        # 按距离排序（升序 = 最相关在前）
+        all_results.sort(key=lambda x: x.get("distance", 1.0))
+
+        # 跨 Collection 去重（标题 Jaccard > 0.8 视为重复）
+        deduped = []
+        seen_titles = []
+        for r in all_results:
+            title = r.get("title", "")
+            is_dup = False
+            for st in seen_titles:
+                if _jaccard_similarity(title, st) > 0.8:
+                    is_dup = True
+                    break
+            if not is_dup:
+                deduped.append(r)
+                seen_titles.append(title)
+
+        self._json(deduped[:10])
+
     def _json(self, data, status=200):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
@@ -86,9 +161,22 @@ class _VectorAPIHandler(BaseHTTPRequestHandler):
         logger.debug("VectorAPI: %s", fmt % args)
 
 
-def _start_vector_api(vector_engine):
+def _jaccard_similarity(a: str, b: str) -> float:
+    """计算两个字符串的 Jaccard 相似度（基于字符集）。"""
+    set_a = set(a)
+    set_b = set(b)
+    if not set_a and not set_b:
+        return 1.0
+    intersection = len(set_a & set_b)
+    union = len(set_a | set_b)
+    return intersection / union if union > 0 else 0.0
+
+
+def _start_vector_api(vector_engine, hotlist_vector=None, rss_vector=None):
     """在后台线程启动向量搜索 API（仅监听 localhost）"""
     _VectorAPIHandler.vector_engine = vector_engine
+    _VectorAPIHandler.hotlist_vector = hotlist_vector
+    _VectorAPIHandler.rss_vector = rss_vector
     server = HTTPServer(("127.0.0.1", VECTOR_API_PORT), _VectorAPIHandler)
     t = threading.Thread(target=server.serve_forever, daemon=True)
     t.start()
@@ -130,8 +218,26 @@ def main():
             logger.error("回填失败: %s", e)
 
     # --- 启动向量搜索内部 API ---
+    # 初始化热榜和 RSS 向量引擎（复用嵌入模型和 ChromaDB 客户端）
+    hotlist_vector = None
+    rss_vector = None
     if vector_engine:
-        _start_vector_api(vector_engine)
+        try:
+            chroma_client = vector_engine.chroma_client
+            encode_fn = vector_engine._encode
+            hotlist_vector = HotlistVectorEngine()
+            hotlist_vector.initialize(chroma_client, encode_fn)
+        except Exception as e:
+            logger.error("热榜向量引擎初始化失败: %s", e)
+        try:
+            chroma_client = vector_engine.chroma_client
+            encode_fn = vector_engine._encode
+            rss_vector = RSSVectorEngine()
+            rss_vector.initialize(chroma_client, encode_fn)
+        except Exception as e:
+            logger.error("RSS 向量引擎初始化失败: %s", e)
+
+        _start_vector_api(vector_engine, hotlist_vector, rss_vector)
 
     # --- 代理配置 ---
     proxy_url = config.get("proxy", {}).get("url")
@@ -162,7 +268,8 @@ def main():
     for module in ["news", "hotlist", "rss"]:
         _run_module(module, news_db, aggregator, vector_engine,
                     hotlist_db, hotlist_fetcher, hotlist_cfg,
-                    rss_db, rss_fetcher, purge_days)
+                    rss_db, rss_fetcher, purge_days,
+                    hotlist_vector=hotlist_vector, rss_vector=rss_vector)
 
     while True:
         time.sleep(1)
@@ -172,20 +279,24 @@ def main():
                 timers[module] = 0
                 _run_module(module, news_db, aggregator, vector_engine,
                             hotlist_db, hotlist_fetcher, hotlist_cfg,
-                            rss_db, rss_fetcher, purge_days)
+                            rss_db, rss_fetcher, purge_days,
+                            hotlist_vector=hotlist_vector, rss_vector=rss_vector)
 
 
 def _run_module(module, news_db, aggregator, vector_engine,
                 hotlist_db, hotlist_fetcher, hotlist_cfg,
-                rss_db, rss_fetcher, purge_days):
+                rss_db, rss_fetcher, purge_days,
+                hotlist_vector=None, rss_vector=None):
     """运行单个模块的采集，失败不影响其他模块"""
     try:
         if module == "news":
             _run_news(news_db, aggregator, vector_engine, purge_days)
         elif module == "hotlist":
-            _run_hotlist(hotlist_db, hotlist_fetcher, hotlist_cfg)
+            _run_hotlist(hotlist_db, hotlist_fetcher, hotlist_cfg,
+                         hotlist_vector=hotlist_vector)
         elif module == "rss":
-            _run_rss(rss_db, rss_fetcher, purge_days)
+            _run_rss(rss_db, rss_fetcher, purge_days,
+                     rss_vector=rss_vector)
     except Exception as e:
         logger.error("%s 采集异常: %s", module, e)
 
@@ -266,22 +377,77 @@ def _vector_pipeline(vector_engine, db, items, row_ids):
         logger.error("向量处理管线异常: %s", e)
 
 
-def _run_hotlist(db, fetcher, config):
-    """热榜采集"""
+def _run_hotlist(db, fetcher, config, hotlist_vector=None):
+    """热榜采集 + 向量化"""
     platforms = config.get("platforms") or None
     items, failed = fetcher.fetch_all_platforms(platforms)
     crawl_time = datetime.now().isoformat()
     inserted = db.insert_batch(items, crawl_time)
+
+    # 新条目向量化
+    if hotlist_vector and hotlist_vector._initialized and inserted > 0:
+        try:
+            # 获取新增的条目（crawl_time 匹配的）
+            conn = db._get_conn()
+            rows = conn.execute(
+                "SELECT id, title, url, platform, platform_name, hot_rank, crawl_time "
+                "FROM hot_items WHERE crawl_time = ?",
+                (crawl_time,),
+            ).fetchall()
+            conn.close()
+            if rows:
+                vector_items = [dict(r) for r in rows]
+                hotlist_vector.upsert_items(vector_items)
+        except Exception as e:
+            logger.error("热榜向量化失败: %s", e)
+
     # 清理过期数据
-    db.purge_old(days=7)
+    purged = db.purge_old(days=7)
+    # 同步 ChromaDB 清理
+    if hotlist_vector and hotlist_vector._initialized and purged > 0:
+        try:
+            conn = db._get_conn()
+            existing_ids = {r[0] for r in conn.execute("SELECT id FROM hot_items").fetchall()}
+            conn.close()
+            hotlist_vector.sync_purge(existing_ids)
+        except Exception as e:
+            logger.error("热榜 ChromaDB 清理失败: %s", e)
+
     logger.info("热榜: 抓取%d条, 入库%d条, 失败%d平台", len(items), inserted, len(failed))
 
 
-def _run_rss(db, fetcher, purge_days):
-    """RSS 采集"""
+def _run_rss(db, fetcher, purge_days, rss_vector=None):
+    """RSS 采集 + 向量化"""
     result = fetcher.fetch_and_store(db)
+
+    # 新条目向量化
+    if rss_vector and rss_vector._initialized and result.get("total_items", 0) > 0:
+        try:
+            # 获取最近的条目进行向量化
+            feeds = db.get_feeds(enabled_only=True)
+            all_items = []
+            for feed in feeds:
+                items = db.get_items(feed_id=feed["id"], days=1, page=1, page_size=50)
+                for it in items["items"]:
+                    it["feed_name"] = feed["name"]
+                all_items.extend(items["items"])
+            if all_items:
+                rss_vector.upsert_items(all_items)
+        except Exception as e:
+            logger.error("RSS 向量化失败: %s", e)
+
     # 清理过期数据
-    db.purge_old(days=purge_days)
+    purged = db.purge_old(days=purge_days)
+    # 同步 ChromaDB 清理
+    if rss_vector and rss_vector._initialized and purged > 0:
+        try:
+            conn = db._get_conn()
+            existing_ids = {r[0] for r in conn.execute("SELECT id FROM rss_items").fetchall()}
+            conn.close()
+            rss_vector.sync_purge(existing_ids)
+        except Exception as e:
+            logger.error("RSS ChromaDB 清理失败: %s", e)
+
     logger.info(
         "RSS: 获取%d源, 失败%d, 共%d条",
         result.get("fetched", 0), result.get("failed", 0), result.get("total_items", 0),

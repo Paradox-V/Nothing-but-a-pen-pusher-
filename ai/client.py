@@ -7,7 +7,7 @@ AI 客户端模块
 """
 
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, Generator, List
 
 # 阻止 litellm 启动时从 GitHub 拉取模型价格表（国内服务器会超时阻塞）
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
@@ -112,6 +112,47 @@ class AIClient:
                 for item in content
             )
         return content or ""
+
+    def chat_stream(
+        self,
+        messages: List[Dict[str, str]],
+        **kwargs
+    ) -> Generator[str, None, None]:
+        """
+        流式调用 AI 模型，逐块返回文本。
+
+        Args:
+            messages: 消息列表
+            **kwargs: 额外参数（覆盖默认配置）
+
+        Yields:
+            str: 每次返回一个文本片段
+        """
+        if not HAS_LITELLM:
+            raise RuntimeError("litellm 未安装，请运行 pip install litellm")
+
+        params = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": kwargs.get("temperature", self.temperature),
+            "timeout": kwargs.get("timeout", self.timeout),
+            "stream": True,
+        }
+
+        if self.api_key:
+            params["api_key"] = self.api_key
+        if self.api_base:
+            params["api_base"] = self.api_base
+
+        max_tokens = kwargs.get("max_tokens", self.max_tokens)
+        if max_tokens and max_tokens > 0:
+            params["max_tokens"] = max_tokens
+
+        response = completion(**params)
+        for chunk in response:
+            delta = chunk.choices[0].delta
+            if delta.content:
+                yield delta.content
 
     def validate_config(self) -> tuple:
         """

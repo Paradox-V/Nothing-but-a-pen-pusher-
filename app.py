@@ -1,7 +1,7 @@
 """
 信源汇总 - Flask 应用入口
 
-三模块：新闻汇总 + 热榜 + RSS订阅
+六模块：新闻汇总 + 热榜 + RSS订阅 + 热点选题 + 文案创作 + 智能问答
 """
 import webbrowser
 from flask import Flask, render_template, jsonify
@@ -9,6 +9,9 @@ from utils.config import load_config
 from modules.news.routes import news_bp
 from modules.hotlist.routes import hotlist_bp
 from modules.rss.routes import rss_bp
+from modules.topic.routes import topic_bp
+from modules.creator.routes import creator_bp
+from modules.chat.routes import chat_bp
 
 app = Flask(__name__)
 app.config["JSON_AS_ASCII"] = False  # 中文不转义
@@ -28,6 +31,9 @@ if _config:
 app.register_blueprint(news_bp)
 app.register_blueprint(hotlist_bp)
 app.register_blueprint(rss_bp)
+app.register_blueprint(topic_bp)
+app.register_blueprint(creator_bp)
+app.register_blueprint(chat_bp)
 
 
 @app.route("/")
@@ -76,11 +82,13 @@ def api_status():
 
 if __name__ == "__main__":
     import argparse
+    import os
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=5000)
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args()
 
-    if not args.no_browser:
+    # 仅主进程（非 watchdog 重启子进程）才开浏览器
+    if not args.no_browser and os.environ.get("WERKZEUG_RUN_MAIN") != "true":
         webbrowser.open(f"http://localhost:{args.port}")
-    app.run(host="0.0.0.0", port=args.port, debug=True)
+    app.run(host="0.0.0.0", port=args.port, debug=False, threaded=True)
