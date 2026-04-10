@@ -109,12 +109,12 @@ class NewsDB:
         批量插入新闻，基于归一化标题去重（content_hash UNIQUE）。
         若标题相同但新条目内容更长，则更新已有记录。
         categories 为 list[list[str]]，写入时 JSON 序列化。
-        返回 (实际新增条数, 新增条目的 row id 列表)。
+        返回 (实际新增条数, 所有受影响的 row id 列表)。
         """
         conn = self._get_conn()
         try:
             added = 0
-            new_row_ids: list[int] = []
+            affected_ids: list[int] = []
             for idx, item in enumerate(items):
                 h = self._dedup_hash(item["title"], item["content"])
                 cat_list = categories[idx] if categories else ["其他"]
@@ -136,7 +136,7 @@ class NewsDB:
                             cid,
                         ),
                     )
-                    new_row_ids.append(cur.lastrowid)
+                    affected_ids.append(cur.lastrowid)
                     added += 1
                 except sqlite3.IntegrityError:
                     # 标题重复 —— 如果新内容更长则更新
@@ -157,8 +157,12 @@ class NewsDB:
                                 existing["id"],
                             ),
                         )
+                        affected_ids.append(existing["id"])
+                    else:
+                        # 内容未更新，但仍需向量处理（可能缺失向量）
+                        affected_ids.append(existing["id"])
             conn.commit()
-            return added, new_row_ids
+            return added, affected_ids
         finally:
             conn.close()
 
@@ -191,7 +195,7 @@ class NewsDB:
             for cat in categories:
                 cat_conds.append("(category LIKE ?)")
                 params.append(f'%"{cat}"%')
-            sql += " AND (" + " AND ".join(cat_conds) + ")"
+            sql += " AND (" + " OR ".join(cat_conds) + ")"
         if keyword:
             sql += " AND (title LIKE ? OR content LIKE ?)"
             params.extend([f"%{keyword}%", f"%{keyword}%"])
@@ -329,6 +333,98 @@ class NewsDB:
                 (cluster_id, limit),
             ).fetchall()
             return [self._row_to_dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def search_by_keywords(
+        self,
+        tokens: list[str],
+        core_tokens: list[str] | None = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        """多 token 关键词搜索，按相关度评分排序。
+
+        Args:
+            tokens: 所有搜索词
+            core_tokens: 高权重核心词（标题+3，内容+1）
+            limit: 最多返回条数
+        """
+        if not tokens:
+            return self.get_latest(limit)
+
+        if core_tokens is None:
+            core_tokens = tokens[:2]
+
+        expand_tokens = [t for t in tokens if t not in core_tokens]
+
+        conn = self._get_conn()
+        try:
+            candidates = {}
+            for token in tokens:
+                rows = conn.execute(
+                    "SELECT id, title, content, source_name, url, created_at, category "
+                    "FROM news WHERE title LIKE ? OR content LIKE ? "
+                    "ORDER BY id DESC LIMIT 50",
+                    (f"%{token}%", f"%{token}%"),
+                ).fetchall()
+                for r in rows:
+                    candidates[r["id"]] = r
+
+            if not candidates:
+                return self.get_latest(limit)
+
+            scored = []
+            for rid, r in candidates.items():
+                title = r["title"] or ""
+                content = r["content"] or ""
+
+                core_score = sum(3 if t in title else 0 for t in core_tokens) + \
+                             sum(1 if t in content else 0 for t in core_tokens)
+                expand_score = sum(1 if t in title else 0 for t in expand_tokens) + \
+                               sum(0.5 if t in content else 0 for t in expand_tokens)
+
+                total_score = core_score + expand_score
+                core_max = len(core_tokens) * 4
+                core_ratio = min(core_score / core_max, 1.0) if core_max > 0 else 0
+                expand_bonus = min(expand_score / 8, 0.25) if expand_tokens else 0
+                sim = round(min(core_ratio * 0.75 + expand_bonus + 0.25, 1.0), 2)
+                if core_score == 0:
+                    sim = round(sim * 0.3, 2)
+
+                scored.append((total_score, sim, r))
+
+            scored.sort(key=lambda x: -x[0])
+
+            return [
+                {
+                    "id": r["id"], "title": r["title"], "content": r["content"],
+                    "source_name": r["source_name"], "url": r["url"],
+                    "created_at": r["created_at"], "category": r["category"],
+                    "similarity": sim,
+                }
+                for _, sim, r in scored[:limit]
+            ]
+        finally:
+            conn.close()
+
+    def get_latest(self, limit: int = 10) -> list[dict]:
+        """返回最新新闻（兜底用）。"""
+        conn = self._get_conn()
+        try:
+            rows = conn.execute(
+                "SELECT id, title, content, source_name, url, created_at, category "
+                "FROM news ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            return [
+                {
+                    "id": r["id"], "title": r["title"], "content": r["content"],
+                    "source_name": r["source_name"], "url": r["url"],
+                    "created_at": r["created_at"], "category": r["category"],
+                    "similarity": 0.0,
+                }
+                for r in rows
+            ]
         finally:
             conn.close()
 

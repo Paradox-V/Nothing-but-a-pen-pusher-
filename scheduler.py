@@ -12,6 +12,7 @@ import threading
 import time
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
 from urllib.parse import urlparse, parse_qs
 
 # 离线模式：跳过 HuggingFace 网络检查
@@ -39,6 +40,11 @@ logger = logging.getLogger(__name__)
 # ── 内部向量 API ─────────────────────────────────────────────
 
 VECTOR_API_PORT = 5001
+
+
+class _ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    """多线程 HTTP 服务器，避免慢查询阻塞其他请求"""
+    daemon_threads = True
 
 
 class _VectorAPIHandler(BaseHTTPRequestHandler):
@@ -94,7 +100,7 @@ class _VectorAPIHandler(BaseHTTPRequestHandler):
         body = self.rfile.read(content_length)
         try:
             data = json.loads(body.decode("utf-8"))
-        except Exception:
+        except (json.JSONDecodeError, UnicodeDecodeError):
             self._json({"error": "invalid JSON"}, 400)
             return
 
@@ -177,7 +183,7 @@ def _start_vector_api(vector_engine, hotlist_vector=None, rss_vector=None):
     _VectorAPIHandler.vector_engine = vector_engine
     _VectorAPIHandler.hotlist_vector = hotlist_vector
     _VectorAPIHandler.rss_vector = rss_vector
-    server = HTTPServer(("127.0.0.1", VECTOR_API_PORT), _VectorAPIHandler)
+    server = _ThreadingHTTPServer(("127.0.0.1", VECTOR_API_PORT), _VectorAPIHandler)
     t = threading.Thread(target=server.serve_forever, daemon=True)
     t.start()
     logger.info("向量 API 已启动: http://127.0.0.1:%d", VECTOR_API_PORT)
@@ -271,8 +277,27 @@ def main():
                     rss_db, rss_fetcher, purge_days,
                     hotlist_vector=hotlist_vector, rss_vector=rss_vector)
 
+    # 加载抓取触发器
+    from utils.crawl_trigger import CrawlTrigger
+    crawl_trigger = CrawlTrigger()
+
     while True:
         time.sleep(1)
+
+        # 检查 Web 触发的抓取信号
+        try:
+            pending = crawl_trigger.poll_pending()
+            for module in pending:
+                logger.info("收到 Web 触发的抓取信号: %s", module)
+                _run_module(module, news_db, aggregator, vector_engine,
+                            hotlist_db, hotlist_fetcher, hotlist_cfg,
+                            rss_db, rss_fetcher, purge_days,
+                            hotlist_vector=hotlist_vector, rss_vector=rss_vector)
+                crawl_trigger.mark_done(module)
+        except Exception as e:
+            logger.error("处理抓取信号失败: %s", e)
+
+        # 定时调度
         for module in ["news", "hotlist", "rss"]:
             timers[module] += 1
             if timers[module] >= intervals[module]:
@@ -383,9 +408,10 @@ def _run_hotlist(db, fetcher, config, hotlist_vector=None):
     items, failed = fetcher.fetch_all_platforms(platforms)
     crawl_time = datetime.now().isoformat()
     inserted = db.insert_batch(items, crawl_time)
+    new_count = inserted["new"] if isinstance(inserted, dict) else inserted
 
     # 新条目向量化
-    if hotlist_vector and hotlist_vector._initialized and inserted > 0:
+    if hotlist_vector and hotlist_vector._initialized and new_count > 0:
         try:
             # 获取新增的条目（crawl_time 匹配的）
             conn = db._get_conn()
@@ -413,7 +439,10 @@ def _run_hotlist(db, fetcher, config, hotlist_vector=None):
         except Exception as e:
             logger.error("热榜 ChromaDB 清理失败: %s", e)
 
-    logger.info("热榜: 抓取%d条, 入库%d条, 失败%d平台", len(items), inserted, len(failed))
+    logger.info("热榜: 抓取%d条, 新增%d条, 更新%d条, 失败%d平台",
+                len(items), new_count,
+                inserted.get("updated", 0) if isinstance(inserted, dict) else 0,
+                len(failed))
 
 
 def _run_rss(db, fetcher, purge_days, rss_vector=None):

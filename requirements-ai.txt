@@ -1,0 +1,4 @@
+# AI/ML dependencies (optional - needed for semantic search & classification)
+-r requirements.txt
+chromadb>=0.4
+sentence-transformers>=2.2

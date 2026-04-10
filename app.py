@@ -3,6 +3,7 @@
 
 六模块：新闻汇总 + 热榜 + RSS订阅 + 热点选题 + 文案创作 + 智能问答
 """
+import sqlite3
 import webbrowser
 from flask import Flask, render_template, jsonify
 from utils.config import load_config
@@ -13,7 +14,7 @@ from modules.topic.routes import topic_bp
 from modules.creator.routes import creator_bp
 from modules.chat.routes import chat_bp
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder="static")
 app.config["JSON_AS_ASCII"] = False  # 中文不转义
 
 # 加载全局配置
@@ -53,36 +54,52 @@ def api_status():
         news_db = NewsDB()
         count = news_db.get_count()
         status["news"] = {"count": count, "available": True}
-    except Exception:
+    except (sqlite3.DatabaseError, sqlite3.OperationalError, OSError):
         status["news"] = {"count": 0, "available": False}
 
     try:
         hotlist_db = HotlistDB()
         last_crawl = hotlist_db.get_last_crawl_time()
         status["hotlist"] = {"last_crawl": last_crawl, "available": True}
-    except Exception:
+    except (sqlite3.DatabaseError, sqlite3.OperationalError, OSError):
         status["hotlist"] = {"available": False}
 
     try:
         rss_db = RSSDB()
         feeds = rss_db.get_feeds()
         status["rss"] = {"feed_count": len(feeds), "available": True}
-    except Exception:
+    except (sqlite3.DatabaseError, sqlite3.OperationalError, OSError):
         status["rss"] = {"available": False}
 
     # AI 模块状态
     try:
         from ai import AI_AVAILABLE
         status["ai"] = {"available": AI_AVAILABLE}
-    except Exception:
+    except (ImportError, ModuleNotFoundError):
         status["ai"] = {"available": False}
 
     return jsonify(status)
 
 
+@app.route("/api/scheduler/health")
+def scheduler_health():
+    """检查 scheduler 向量服务状态"""
+    from utils.scheduler_client import is_scheduler_alive
+    alive = is_scheduler_alive()
+    return jsonify({"scheduler": alive}), 200 if alive else 503
+
+
 if __name__ == "__main__":
     import argparse
     import os
+
+    # 加载 .env 环境变量
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=5000)
     parser.add_argument("--no-browser", action="store_true")

@@ -18,11 +18,12 @@ from modules.creator.framework import (
     _call_llm,
     _default_ai_config,
 )
+from modules.creator.db import CreatorDB
 
 logger = logging.getLogger(__name__)
 
-# 任务状态跟踪
-_tasks: dict[str, dict] = {}
+# 持久化任务存储
+_db = CreatorDB()
 
 
 def start_article_generation(
@@ -40,18 +41,13 @@ def start_article_generation(
         raise ValueError("框架未确认，无法生成文章")
 
     task_id = uuid.uuid4().hex[:12]
-    _tasks[task_id] = {
-        "framework_id": fw_id,
-        "status": "running",
-        "progress": "正在生成文章...",
-        "result": None,
-    }
+    _db.create_task(task_id, fw_id)
 
     config = ai_config or _default_ai_config()
 
     def _worker():
         try:
-            _tasks[task_id]["progress"] = "正在生成文章..."
+            _db.update_task(task_id, progress="正在生成文章...")
             article = _generate_article(fw, config)
             fw.final_article = article
             fw.status = FrameworkStatus.COMPLETED
@@ -59,25 +55,27 @@ def start_article_generation(
             # 配图
             images = []
             if image_count > 0:
-                _tasks[task_id]["progress"] = f"正在生成 {image_count} 张配图..."
+                _db.update_task(task_id, progress=f"正在生成 {image_count} 张配图...")
                 from modules.creator.image_gen import generate_images
                 images = generate_images(article, image_count)
 
             fw.images = images
             store_framework(fw)
 
-            _tasks[task_id]["status"] = "completed"
-            _tasks[task_id]["progress"] = "完成"
-            _tasks[task_id]["result"] = {
-                "article": article,
-                "images": images,
-                "framework_id": fw_id,
-            }
+            _db.update_task(
+                task_id,
+                status="completed",
+                progress="完成",
+                result={
+                    "article": article,
+                    "images": images,
+                    "framework_id": fw_id,
+                },
+            )
 
         except Exception as e:
             logger.error("文章生成任务失败: %s", e)
-            _tasks[task_id]["status"] = "failed"
-            _tasks[task_id]["progress"] = str(e)
+            _db.update_task(task_id, status="failed", progress=str(e))
             fw.status = FrameworkStatus.FAILED
             store_framework(fw)
 
@@ -87,7 +85,7 @@ def start_article_generation(
 
 
 def get_task_status(task_id: str) -> dict | None:
-    return _tasks.get(task_id)
+    return _db.get_task(task_id)
 
 
 def _generate_article(fw: Framework, ai_config: dict) -> str:

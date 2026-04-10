@@ -1,0 +1,3 @@
+# Deployment dependencies (SSH-based deploy/restart)
+-r requirements.txt
+paramiko>=3.0

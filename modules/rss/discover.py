@@ -12,6 +12,8 @@ from urllib.parse import quote, urlparse
 
 import httpx
 
+from utils.url_security import validate_url
+
 logger = logging.getLogger(__name__)
 
 
@@ -42,6 +44,11 @@ class RSSHubDiscover:
         Returns:
             {"success": bool, "site_name": str, "domain": str, "routes": [...]}
         """
+        # 0. SSRF 校验
+        is_safe, error = validate_url(url)
+        if not is_safe:
+            return {"success": False, "error": f"URL 校验失败: {error}"}
+
         # 1. 提取域名
         domain = self._extract_domain(url)
         if not domain:
@@ -106,7 +113,7 @@ class RSSHubDiscover:
             parsed = urlparse(url)
             domain = parsed.hostname or ""
             return domain.lower()
-        except Exception:
+        except (ValueError, AttributeError):
             return ""
 
     def _match_site(self, domain: str) -> tuple:
@@ -179,8 +186,7 @@ class RSSHubDiscover:
                 "sample_items": [],
                 "item_count": 0,
             }
-        except Exception as e:
-            logger.warning("RSSHub 路由 %s 获取失败: %s", path, e)
+        except (httpx.HTTPStatusError, httpx.RequestError, ValueError) as e:
             return {
                 "name": name,
                 "error": "获取失败",
@@ -196,16 +202,22 @@ class RSSHubDiscover:
         ("标题", "h2, h3"),
     ]
 
-    def generic_discover(self, url: str, item_selector: str = None) -> dict:
+    def generic_discover(self, url: str, item_selector: str = None, title_selector: str = None) -> dict:
         """通用 HTML 转换回退：通过 RSSHub transform 路由生成 RSS 源。
 
         Args:
             url: 目标网站 URL
             item_selector: 可选的自定义 CSS 选择器，为 None 时自动尝试
+            title_selector: 可选的标题 CSS 选择器
 
         Returns:
             与 discover() 相同格式的结果字典
         """
+        # SSRF 校验
+        is_safe, error = validate_url(url)
+        if not is_safe:
+            return {"success": False, "error": f"URL 校验失败: {error}"}
+
         original_url = url.strip()
         if not original_url.startswith(("http://", "https://")):
             original_url = "https://" + original_url
@@ -219,7 +231,7 @@ class RSSHubDiscover:
         if item_selector:
             # 用户自定义选择器
             results = [
-                self._try_html_transform(encoded_url, "自定义", item_selector)
+                self._try_html_transform(encoded_url, "自定义", item_selector, title_selector)
             ]
         else:
             # 并行自动尝试多个选择器
@@ -255,10 +267,12 @@ class RSSHubDiscover:
         }
 
     def _try_html_transform(
-        self, encoded_url: str, label: str, item_selector: str
+        self, encoded_url: str, label: str, item_selector: str, title_selector: str = None
     ) -> dict | None:
         """调用 RSSHub HTML transform 路由尝试单个选择器。"""
         route_params = f"item={quote(item_selector, safe='')}"
+        if title_selector:
+            route_params += f"&title={quote(title_selector, safe='')}"
         feed_url = f"{self.base_url}/rsshub/transform/html/{encoded_url}/{route_params}"
 
         try:
@@ -291,5 +305,5 @@ class RSSHubDiscover:
                 "item_count": len(items),
                 "_site_name": data.get("title", ""),
             }
-        except Exception:
+        except (httpx.HTTPStatusError, httpx.RequestError, ValueError, KeyError):
             return None

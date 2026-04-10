@@ -12,9 +12,9 @@ from typing import Generator
 
 import httpx
 
-logger = logging.getLogger(__name__)
+from utils.scheduler_client import scheduler_post
 
-SCHEDULER_URL = "http://127.0.0.1:5001"
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """你是"信源汇总"平台的智能分析助手。根据以下检索到的新闻、热榜、RSS 资料回答用户问题。
 
@@ -44,35 +44,20 @@ class ChatService:
         return self._ai_client
 
     def _build_ai_config(self) -> dict:
-        try:
-            from utils.config import load_config
-            cfg = load_config()
-            ai = cfg.get("ai", {})
-            return {
-                "MODEL": ai.get("model", "deepseek/deepseek-chat"),
-                "API_KEY": ai.get("api_key", "") or os.environ.get("DEEPSEEK_API_KEY", ""),
-                "API_BASE": ai.get("base_url", ""),
-                "TEMPERATURE": 0.7,
-                "MAX_TOKENS": 2000,
-            }
-        except Exception:
-            return {
-                "MODEL": "deepseek/deepseek-chat",
-                "API_KEY": os.environ.get("DEEPSEEK_API_KEY", ""),
-            }
+        from ai.config import get_ai_config
+        config = get_ai_config()
+        config["TEMPERATURE"] = 0.7
+        config["MAX_TOKENS"] = 2000
+        return config
 
     def chat(self, session_id: str, question: str) -> Generator[str, None, None]:
         """核心对话流程：检索 → 构建 Prompt → 流式生成。"""
         # 1. 代理到调度器进行向量检索
         search_results = []
         try:
-            resp = httpx.post(
-                f"{SCHEDULER_URL}/chat_search",
-                json={"query": question, "top_k": 5},
-                timeout=10,
-            )
-            if resp.status_code == 200:
-                search_results = resp.json()
+            result = scheduler_post("/chat_search", json_data={"query": question, "top_k": 5}, timeout=10)
+            if result and isinstance(result, list):
+                search_results = result
         except Exception as e:
             logger.warning("向量检索失败: %s", e)
 

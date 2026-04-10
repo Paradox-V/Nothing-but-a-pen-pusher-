@@ -1,13 +1,22 @@
-"""部署脚本：上传新模块到服务器并重启 gunicorn"""
+"""部署脚本：上传新模块到服务器并重启 gunicorn
+
+配置通过环境变量读取，不再硬编码凭据：
+  DEPLOY_HOST     - 服务器地址
+  DEPLOY_USER     - SSH 用户名
+  DEPLOY_SSH_KEY_PATH - SSH 私钥路径（推荐）
+
+也可通过 .env 文件配置（python-dotenv）
+"""
 import os
 import time
 import paramiko
 
-HOST = "49.232.239.68"
-USER = "ubuntu"
-PASS = "Dyp1213812138"
+# 从环境变量读取配置
+HOST = os.environ.get("DEPLOY_HOST", "")
+USER = os.environ.get("DEPLOY_USER", "ubuntu")
+SSH_KEY_PATH = os.environ.get("DEPLOY_SSH_KEY_PATH", os.path.expanduser("~/.ssh/id_rsa"))
 REMOTE_BASE = "/opt/news_aggregator"
-LOCAL_BASE = r"C:\Users\35368\Desktop\信源汇总 - 副本"
+LOCAL_BASE = os.path.dirname(os.path.abspath(__file__))
 
 FILES = [
     "app.py",
@@ -28,16 +37,34 @@ FILES = [
 def ssh_exec(ssh, cmd, sudo=False):
     """执行命令，支持 sudo"""
     if sudo:
-        cmd = f"echo '{PASS}' | sudo -S {cmd}"
+        cmd = f"sudo {cmd}"
     stdin, stdout, stderr = ssh.exec_command(cmd)
     return stdout.read().decode(), stderr.read().decode()
 
 
 def main():
+    if not HOST:
+        print("错误: 请设置环境变量 DEPLOY_HOST")
+        print("  export DEPLOY_HOST=your_server_ip")
+        print("  或创建 .env 文件（参考 .env.example）")
+        return
+
     ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    # 使用 known_hosts 验证，防止 MITM
+    known_hosts = os.path.expanduser("~/.ssh/known_hosts")
+    if os.path.exists(known_hosts):
+        ssh.load_host_keys(known_hosts)
+    ssh.set_missing_host_key_policy(paramiko.RejectPolicy())
+
     print(f"连接 {HOST}...")
-    ssh.connect(HOST, username=USER, password=PASS)
+    try:
+        ssh.connect(HOST, username=USER, key_filename=SSH_KEY_PATH)
+    except paramiko.AuthenticationException:
+        print(f"SSH Key 认证失败，请检查密钥: {SSH_KEY_PATH}")
+        return
+    except Exception as e:
+        print(f"连接失败: {e}")
+        return
 
     # 在 /tmp 创建临时上传目录
     TMP_DIR = "/tmp/news_deploy"
@@ -107,4 +134,10 @@ def main():
 
 
 if __name__ == "__main__":
+    # 尝试加载 .env 文件
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
     main()

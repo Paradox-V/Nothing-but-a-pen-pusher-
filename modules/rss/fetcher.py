@@ -14,6 +14,10 @@ from typing import List, Dict, Optional, Tuple
 import requests
 
 from modules.rss.parser import RSSParser
+from utils.url_security import validate_url
+
+import logging
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -74,7 +78,12 @@ class RSSFetcher:
             每个条目字典包含: title, feed_id, url, author, summary, published_at
         """
         try:
+            # SSRF 校验（本地 RSSHub 地址放行）
             is_local = feed_config.url.startswith(("http://127.0.0.1", "http://localhost"))
+            if not is_local:
+                is_safe, error = validate_url(feed_config.url)
+                if not is_safe:
+                    return [], f"URL 校验失败: {error}"
             if is_local:
                 # 本地地址（如 RSSHub Docker 容器）直接请求
                 response = self.session.get(
@@ -114,27 +123,27 @@ class RSSFetcher:
                     "published_at": parsed.published_at or "",
                 })
 
-            print(f"[RSS] {feed_config.name}: 获取 {len(items)} 条")
+            logger.info("[RSS] %s: 获取 %d 条", feed_config.name, len(items))
             return items, None
 
         except requests.Timeout:
             error = f"请求超时 ({self.timeout}s)"
-            print(f"[RSS] {feed_config.name}: {error}")
+            logger.warning("[RSS] %s: %s", feed_config.name, error)
             return [], error
 
         except requests.RequestException as e:
             error = f"请求失败: {e}"
-            print(f"[RSS] {feed_config.name}: {error}")
+            logger.warning("[RSS] %s: %s", feed_config.name, error)
             return [], error
 
         except ValueError as e:
             error = f"解析失败: {e}"
-            print(f"[RSS] {feed_config.name}: {error}")
+            logger.warning("[RSS] %s: %s", feed_config.name, error)
             return [], error
 
         except Exception as e:
             error = f"未知错误: {e}"
-            print(f"[RSS] {feed_config.name}: {error}")
+            logger.error("[RSS] %s: %s", feed_config.name, error)
             return [], error
 
     def fetch_and_store(self, db) -> Dict[str, int]:
@@ -152,14 +161,14 @@ class RSSFetcher:
         feeds_data = db.get_feeds(enabled_only=True)
 
         if not feeds_data:
-            print("[RSS] 没有启用的 RSS 源")
+            logger.info("[RSS] 没有启用的 RSS 源")
             return {"fetched": 0, "failed": 0, "total_items": 0}
 
         fetched = 0
         failed = 0
         total_items = 0
 
-        print(f"[RSS] 开始抓取 {len(feeds_data)} 个 RSS 源...")
+        logger.info("[RSS] 开始抓取 %d 个 RSS 源...", len(feeds_data))
 
         for i, feed_data in enumerate(feeds_data):
             # 请求间隔（1-3 秒随机）
@@ -189,9 +198,9 @@ class RSSFetcher:
                     db.insert_items(items, crawl_time)
                 db.update_feed_status(feed_config.id, error=None)
 
-        print(
-            f"[RSS] 抓取完成: {fetched} 个源成功, "
-            f"{failed} 个失败, 共 {total_items} 条"
+        logger.info(
+            "[RSS] 抓取完成: %d 个源成功, %d 个失败, 共 %d 条",
+            fetched, failed, total_items,
         )
         return {
             "fetched": fetched,

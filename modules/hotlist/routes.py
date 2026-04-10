@@ -2,11 +2,8 @@
 """热榜模块 Flask Blueprint 路由"""
 
 from flask import Blueprint, request, jsonify
-from datetime import datetime
 
 from modules.hotlist.db import HotlistDB
-from modules.hotlist.fetcher import DataFetcher
-from utils.config import load_config
 
 hotlist_bp = Blueprint("hotlist", __name__)
 
@@ -55,41 +52,11 @@ def get_platforms():
 
 @hotlist_bp.route("/api/hotlist/fetch", methods=["POST"])
 def fetch_hotlist():
-    """手动触发热榜数据抓取。
-
-    从 config.yaml 读取 api_url 和 platforms 列表，
-    调用 DataFetcher 抓取数据并写入数据库。
-    """
-    config = load_config()
-    hotlist_cfg = config.get("hotlist", {})
-
-    api_url = hotlist_cfg.get("api_url")
-    platforms = hotlist_cfg.get("platforms")
-    proxy_url = config.get("proxy", {}).get("url")
-
-    fetcher = DataFetcher(api_url=api_url, proxy_url=proxy_url)
-    items, failed_ids = fetcher.fetch_all_platforms(platform_ids=platforms)
-
-    db = HotlistDB()
-    crawl_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    inserted = 0
-    try:
-        db.insert_batch(items, crawl_time)
-        inserted = len(items)
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "inserted": 0,
-            "failed": len(failed_ids),
-            "error": str(e),
-        }), 500
-
-    return jsonify({
-        "success": True,
-        "inserted": inserted,
-        "failed": len(failed_ids),
-    })
+    """触发热榜抓取信号，scheduler 执行。"""
+    from utils.crawl_trigger import CrawlTrigger
+    trigger = CrawlTrigger()
+    trigger.trigger("hotlist")
+    return jsonify({"success": True, "message": "已触发热榜抓取信号"})
 
 
 @hotlist_bp.route("/api/hotlist/status", methods=["GET"])

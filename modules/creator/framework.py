@@ -58,18 +58,58 @@ class Framework:
             "round": self.round,
         }
 
+    def to_db_dict(self) -> dict:
+        """完整字典（用于持久化，不含截断）"""
+        return {
+            "id": self.id,
+            "title": self.title,
+            "requirements": self.requirements,
+            "industry": self.industry,
+            "keyword": self.keyword,
+            "article_structure": self.article_structure,
+            "writing_approach": self.writing_approach,
+            "reference_material": self.reference_material,
+            "status": self.status.value,
+            "chat_history": self.chat_history,
+            "final_article": self.final_article,
+            "images": self.images,
+            "round": self.round,
+        }
 
-# ── 内存存储 ──────────────────────────────────────────────────
+    @classmethod
+    def from_db_dict(cls, d: dict) -> "Framework":
+        """从数据库字典恢复 Framework 对象"""
+        return cls(
+            id=d["id"],
+            title=d["title"],
+            requirements=d.get("requirements", ""),
+            industry=d.get("industry", ""),
+            keyword=d.get("keyword", ""),
+            article_structure=d.get("article_structure", ""),
+            writing_approach=d.get("writing_approach", ""),
+            reference_material=d.get("reference_material", ""),
+            status=FrameworkStatus(d.get("status", "draft")),
+            chat_history=d.get("chat_history", []),
+            final_article=d.get("final_article", ""),
+            images=d.get("images", []),
+            round=d.get("round", 0),
+        )
 
-_frameworks: dict[str, Framework] = {}
+
+# ── 持久化存储 ──────────────────────────────────────────────────
+
+from modules.creator.db import CreatorDB
+
+_db = CreatorDB()
 
 
 def get_framework(fw_id: str) -> Framework | None:
-    return _frameworks.get(fw_id)
+    d = _db.get_framework(fw_id)
+    return Framework.from_db_dict(d) if d else None
 
 
 def store_framework(fw: Framework) -> None:
-    _frameworks[fw.id] = fw
+    _db.save_framework(fw.to_db_dict())
 
 
 # ── AI 调用封装 ───────────────────────────────────────────────
@@ -85,17 +125,8 @@ def _call_llm(messages: list[dict], ai_config: dict | None = None) -> str:
 
 
 def _default_ai_config() -> dict:
-    try:
-        from utils.config import load_config
-        cfg = load_config()
-        ai = cfg.get("ai", {})
-        return {
-            "MODEL": ai.get("model", "deepseek/deepseek-chat"),
-            "API_KEY": ai.get("api_key", ""),
-            "API_BASE": ai.get("base_url", ""),
-        }
-    except Exception:
-        return {}
+    from ai.config import get_ai_config
+    return get_ai_config()
 
 
 def _extract_json(content: str) -> dict:
@@ -195,7 +226,7 @@ def create_framework(
         fw.article_structure = data.get("article_structure", "")
         fw.writing_approach = data.get("writing_approach", "")
         fw.status = FrameworkStatus.DRAFT
-    except Exception as e:
+    except (ConnectionError, TimeoutError, json.JSONDecodeError, ValueError) as e:
         logger.error("框架生成失败: %s", e)
         fw.article_structure = "引言→现状分析→问题剖析→解决方案→总结展望"
         fw.writing_approach = "从行业现状切入，结合关键词深入分析问题本质，提出切实可行的解决方案。"
@@ -268,9 +299,8 @@ def update_framework(
             fw.writing_approach = data["writing_approach"]
         fw.status = FrameworkStatus.EDITING
         fw.chat_history.append({"role": "assistant", "content": f"框架已更新。\n\n**文章结构：** {fw.article_structure}\n\n**切入点+创作维度：** {fw.writing_approach}"})
-    except Exception as e:
+    except (ConnectionError, TimeoutError, json.JSONDecodeError, ValueError) as e:
         logger.error("框架更新失败: %s", e)
-        fw.chat_history.append({"role": "assistant", "content": f"更新失败: {e}"})
 
     store_framework(fw)
     return fw
@@ -295,6 +325,6 @@ def _search_references(title: str, industry: str, keyword: str) -> str:
             for i, r in enumerate(results[:3], 1):
                 refs.append(f"【参考{i}】{r.get('title', '')}\n{(r.get('content') or '')[:200]}")
             return "\n\n".join(refs)
-    except Exception as e:
+    except (ImportError, ConnectionError, RuntimeError, ValueError) as e:
         logger.warning("参考素材检索失败: %s", e)
     return ""

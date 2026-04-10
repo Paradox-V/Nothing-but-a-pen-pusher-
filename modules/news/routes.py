@@ -3,14 +3,9 @@
 
 从 news_viewer.py 提取的全部 API 路由，
 包括新闻列表、状态查询、语义搜索、分类统计、专题聚合、手动抓取。
-
-注意：向量处理（去重/分类/聚类）由 scheduler 独立进程负责，
-Web 进程默认不加载 Embedding 模型以节省内存（~700MB）。
-设置环境变量 ENABLE_WEB_VECTOR=1 可启用 Web 端向量功能。
 """
 
 import logging
-import threading
 
 from flask import Blueprint, jsonify, request
 
@@ -19,10 +14,6 @@ from modules.news.db import NewsDB
 logger = logging.getLogger(__name__)
 
 news_bp = Blueprint("news", __name__)
-
-# ── 全局组件 ──────────────────────────────────────────────
-_fetching = False
-_fetch_lock = threading.Lock()
 
 
 # ── 路由 ──────────────────────────────────────────────────
@@ -84,22 +75,17 @@ def api_semantic_search():
     category = request.args.get("category") or request.args.get("categories")
     source = request.args.get("source") or request.args.get("sources")
 
-    try:
-        import httpx
-        params = {"q": query, "n": str(n)}
-        if category:
-            params["category"] = category
-        if source:
-            params["source"] = source
-        resp = httpx.get(
-            "http://127.0.0.1:5001/semantic_search",
-            params=params,
-            timeout=30,
-        )
-        return jsonify(resp.json())
-    except Exception as e:
-        logger.error("语义搜索代理失败: %s", e)
-        return jsonify({"error": f"语义搜索服务不可用: {e}"}), 503
+    from utils.scheduler_client import scheduler_get
+    params = {"q": query, "n": str(n)}
+    if category:
+        params["category"] = category
+    if source:
+        params["source"] = source
+    result = scheduler_get("/semantic_search", params=params, timeout=30)
+    if result is not None:
+        return jsonify(result)
+
+    return jsonify({"error": "语义搜索服务不可用，请检查 scheduler 是否运行"}), 503
 
 
 @news_bp.route("/api/news/categories")
@@ -111,36 +97,11 @@ def api_categories():
 
 @news_bp.route("/api/news/fetch", methods=["POST"])
 def api_fetch():
-    """手动触发新闻采集。向量处理由 scheduler 在下一周期自动完成。"""
-    global _fetching
-
-    with _fetch_lock:
-        if _fetching:
-            return jsonify({"error": "正在抓取中，请稍候"}), 409
-        _fetching = True
-
-    try:
-        from modules.news.aggregator import AKSourceAggregator
-
-        db = NewsDB()
-        agg = AKSourceAggregator(db=db)
-        result = agg.fetch_and_store(purge_days=7)
-
-        # 向量处理（去重/分类/聚类）由 scheduler 负责，Web 端仅抓取入库
-        result["note"] = "向量处理将由调度器自动完成"
-
-        stats = db.get_source_stats()
-        return jsonify({
-            **result,
-            "source_stats": stats,
-            "sources_count": len(stats),
-            "sources": db.get_sources_list(),
-        })
-    except Exception as e:
-        logger.error("手动抓取失败: %s", e)
-        return jsonify({"error": str(e)}), 500
-    finally:
-        _fetching = False
+    """触发新闻采集。通过信号通知 scheduler 执行，避免并发冲突。"""
+    from utils.crawl_trigger import CrawlTrigger
+    trigger = CrawlTrigger()
+    trigger.trigger("news")
+    return jsonify({"success": True, "message": "已触发新闻抓取信号，scheduler 将在下一个周期执行"})
 
 
 @news_bp.route("/api/news/clusters")

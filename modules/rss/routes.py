@@ -10,6 +10,8 @@ from flask import Blueprint, request, jsonify
 from modules.rss.db import RSSDB
 from modules.rss.fetcher import RSSFetcher
 from modules.rss.discover import RSSHubDiscover
+from utils.auth import require_auth
+from utils.url_security import validate_url
 
 rss_bp = Blueprint("rss", __name__)
 
@@ -34,11 +36,13 @@ def get_items():
         days (int, default 7): 最近 N 天
         page (int, default 1): 页码
         page_size (int, default 30): 每页条数
+        keyword (str, optional): 搜索标题或摘要
     """
     feed_id = request.args.get("feed_id")
     days = request.args.get("days", 7, type=int)
     page = request.args.get("page", 1, type=int)
     page_size = request.args.get("page_size", 30, type=int)
+    keyword = request.args.get("keyword")
 
     db = _get_db()
     result = db.get_items(
@@ -46,6 +50,7 @@ def get_items():
         days=days,
         page=page,
         page_size=page_size,
+        keyword=keyword or None,
     )
     return jsonify(result)
 
@@ -76,6 +81,11 @@ def add_feed():
     url = data.get("url", "").strip()
     if not name or not url:
         return jsonify({"success": False, "error": "name 和 url 为必填项"}), 400
+
+    # SSRF 校验
+    is_safe, url_error = validate_url(url)
+    if not is_safe:
+        return jsonify({"success": False, "error": f"URL 校验失败: {url_error}"}), 400
 
     kwargs = {}
     if "format" in data:
@@ -134,6 +144,7 @@ def update_feed(feed_id: str):
 
 
 @rss_bp.route("/api/rss/feeds/<feed_id>", methods=["DELETE"])
+@require_auth
 def delete_feed(feed_id: str):
     """删除 RSS 源及其所有条目"""
     db = _get_db()
@@ -154,16 +165,11 @@ def delete_feed(feed_id: str):
 
 @rss_bp.route("/api/rss/fetch", methods=["POST"])
 def fetch_feeds():
-    """手动触发 RSS 抓取"""
-    try:
-        db = _get_db()
-        from flask import current_app
-        proxy_url = current_app.config.get("PROXY_URL")
-        fetcher = RSSFetcher(proxy_url=proxy_url)
-        result = fetcher.fetch_and_store(db)
-        return jsonify({"success": True, **result})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+    """触发 RSS 抓取信号，scheduler 执行。"""
+    from utils.crawl_trigger import CrawlTrigger
+    trigger = CrawlTrigger()
+    trigger.trigger("rss")
+    return jsonify({"success": True, "message": "已触发 RSS 抓取信号"})
 
 
 # ── 站点发现 ──────────────────────────────────────────────
@@ -209,13 +215,15 @@ def custom_discover_feed():
     if not url or not item_selector:
         return jsonify({"success": False, "error": "url 和 item_selector 为必填项"}), 400
 
+    title_selector = data.get("title_selector", "").strip() or None
+
     from flask import current_app
 
     rsshub_config = current_app.config.get("RSSHUB_CONFIG", {})
 
     try:
         discoverer = RSSHubDiscover(rsshub_config)
-        result = discoverer.generic_discover(url, item_selector=item_selector)
+        result = discoverer.generic_discover(url, item_selector=item_selector, title_selector=title_selector)
         if not result.get("success"):
             return jsonify(result), 400
         return jsonify(result)

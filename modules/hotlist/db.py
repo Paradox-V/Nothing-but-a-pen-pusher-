@@ -111,75 +111,118 @@ class HotlistDB:
         - 首次出现：INSERT
         - 再次出现：UPDATE hot_rank / hot_score / crawl_time / appear_count
 
+        使用批量 SELECT 代替逐条查询，减少 N+1 问题。
+
         Args:
             items: dict 列表，每个含 title, url, platform, platform_name, hot_rank, hot_score
             crawl_time: 抓取时间（字符串或 datetime）
 
         Returns:
-            实际新增的条目数
+            dict: {"new": 实际新增数, "updated": 更新数, "total": 总处理数}
         """
         if isinstance(crawl_time, datetime):
             crawl_time = crawl_time.strftime("%Y-%m-%d %H:%M:%S")
 
+        # 预处理：去空、收集平台
+        valid_items = []
+        platform_set = set()
+        for item in items:
+            title = item.get("title", "")
+            platform = item.get("platform", "")
+            if not title or not platform:
+                continue
+            platform_set.add(platform)
+            valid_items.append(item)
+
+        if not valid_items:
+            return {"new": 0, "updated": 0, "total": 0}
+
         conn = self._get_conn()
         cur = conn.cursor()
 
-        platform_set = set()
-        new_count = 0
-
         try:
-            for item in items:
-                title = item.get("title", "")
+            # 批量查询所有已存在的 (title, platform) → id 映射
+            # 使用临时表避免 SQL 注入和 IN 子句长度限制
+            cur.execute("CREATE TEMP TABLE IF NOT EXISTS _batch_keys (title TEXT, platform TEXT)")
+            cur.execute("DELETE FROM _batch_keys")
+            cur.executemany(
+                "INSERT INTO _batch_keys (title, platform) VALUES (?, ?)",
+                [(item["title"], item["platform"]) for item in valid_items],
+            )
+
+            existing_map = {}
+            for row in cur.execute(
+                """SELECT h.id, h.title, h.platform
+                   FROM hot_items h
+                   INNER JOIN _batch_keys b
+                     ON h.title = b.title AND h.platform = b.platform"""
+            ).fetchall():
+                existing_map[(row["title"], row["platform"])] = row["id"]
+
+            cur.execute("DELETE FROM _batch_keys")
+
+            # 分离新增和更新
+            new_count = 0
+            updated_count = 0
+            new_rows = []
+            update_rows = []
+
+            for item in valid_items:
+                title = item["title"]
+                platform = item["platform"]
                 url = item.get("url", "")
-                platform = item.get("platform", "")
                 platform_name = item.get("platform_name", "")
                 hot_rank = item.get("hot_rank")
-                hot_score = item.get("hot_score", "")
+                hot_score = str(item.get("hot_score", "")) if item.get("hot_score") is not None else ""
 
-                if not title or not platform:
-                    continue
+                key = (title, platform)
+                if key in existing_map:
+                    update_rows.append((url, url, hot_rank, hot_score, crawl_time, crawl_time, existing_map[key]))
+                    updated_count += 1
+                else:
+                    new_rows.append((
+                        title, url, platform, platform_name,
+                        hot_rank, hot_score,
+                        crawl_time, crawl_time, crawl_time,
+                    ))
+                    new_count += 1
 
-                platform_set.add(platform)
-
-                row_before = cur.execute("SELECT changes()").fetchone()[0]
-                cur.execute(
-                    """
-                    INSERT INTO hot_items
+            # 批量 INSERT
+            if new_rows:
+                cur.executemany(
+                    """INSERT INTO hot_items
                         (title, url, platform, platform_name,
                          hot_rank, hot_score,
                          crawl_time, first_time, last_time, appear_count)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-                    ON CONFLICT(title, platform) DO UPDATE SET
-                        url = CASE WHEN LENGTH(excluded.url) > LENGTH(hot_items.url)
-                                   OR hot_items.url IS NULL
-                                   THEN excluded.url ELSE hot_items.url END,
-                        hot_rank = excluded.hot_rank,
-                        hot_score = excluded.hot_score,
-                        crawl_time = excluded.crawl_time,
-                        last_time = excluded.crawl_time,
-                        appear_count = hot_items.appear_count + 1
-                    """,
-                    (
-                        title, url, platform, platform_name,
-                        hot_rank,
-                        str(hot_score) if hot_score is not None else "",
-                        crawl_time, crawl_time, crawl_time,
-                    ),
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
+                    new_rows,
                 )
-                if conn.total_changes and conn.total_changes > (row_before or 0):
-                    new_count += 1
+
+            # 批量 UPDATE
+            if update_rows:
+                cur.executemany(
+                    """UPDATE hot_items SET
+                        url = CASE WHEN LENGTH(?) > LENGTH(hot_items.url)
+                                   OR hot_items.url IS NULL
+                                   THEN ? ELSE hot_items.url END,
+                        hot_rank = ?,
+                        hot_score = ?,
+                        crawl_time = ?,
+                        last_time = ?,
+                        appear_count = appear_count + 1
+                       WHERE id = ?""",
+                    update_rows,
+                )
 
             # Record the crawl batch
             cur.execute(
-                """
-                INSERT INTO crawl_batches (crawl_time, platform_count, item_count)
-                VALUES (?, ?, ?)
-                """,
-                (crawl_time, len(platform_set), len(items)),
+                """INSERT INTO crawl_batches (crawl_time, platform_count, item_count)
+                   VALUES (?, ?, ?)""",
+                (crawl_time, len(platform_set), len(valid_items)),
             )
 
             conn.commit()
-            return new_count
+            return {"new": new_count, "updated": updated_count, "total": new_count + updated_count}
         except Exception:
             conn.rollback()
             raise

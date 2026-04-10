@@ -243,25 +243,23 @@ class RSSDB:
         try:
             inserted = 0
             for item in items:
-                try:
-                    conn.execute(
-                        """INSERT OR IGNORE INTO rss_items
-                           (title, feed_id, url, author, summary, published_at, crawl_time)
-                           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                        (
-                            item["title"],
-                            item["feed_id"],
-                            item.get("url"),
-                            item.get("author"),
-                            item.get("summary"),
-                            item.get("published_at"),
-                            crawl_time,
-                        ),
-                    )
-                    if conn.total_changes:
-                        inserted += 1
-                except sqlite3.IntegrityError:
-                    continue
+                cur = conn.execute(
+                    """INSERT OR IGNORE INTO rss_items
+                       (title, feed_id, url, author, summary, published_at, crawl_time)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        item["title"],
+                        item["feed_id"],
+                        item.get("url"),
+                        item.get("author"),
+                        item.get("summary"),
+                        item.get("published_at"),
+                        crawl_time,
+                    ),
+                )
+                # cur.rowcount: 1=成功插入, 0=被 IGNORE（已存在）
+                if cur.rowcount > 0:
+                    inserted += 1
             conn.commit()
             return inserted
         finally:
@@ -273,6 +271,7 @@ class RSSDB:
         days: int = 7,
         page: int = 1,
         page_size: int = 30,
+        keyword: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         分页获取条目
@@ -282,6 +281,7 @@ class RSSDB:
             days: 获取最近 N 天的条目
             page: 页码（从 1 开始）
             page_size: 每页条数
+            keyword: 可选的关键词搜索（匹配 title 或 summary）
 
         Returns:
             {"items": [...], "total": N, "page": N, "page_size": N}
@@ -289,34 +289,34 @@ class RSSDB:
         since = (datetime.now() - timedelta(days=days)).isoformat()
         offset = (page - 1) * page_size
 
+        # 构建 WHERE 子句
+        conditions = ["crawl_time >= ?"]
+        params: list[Any] = [since]
+
+        if feed_id:
+            conditions.append("feed_id = ?")
+            params.append(feed_id)
+
+        if keyword:
+            conditions.append("(title LIKE ? OR summary LIKE ?)")
+            params.append(f"%{keyword}%")
+            params.append(f"%{keyword}%")
+
+        where = " AND ".join(conditions)
+
         conn = self._get_conn()
         try:
-            if feed_id:
-                total = conn.execute(
-                    "SELECT COUNT(*) FROM rss_items WHERE feed_id = ? AND crawl_time >= ?",
-                    (feed_id, since),
-                ).fetchone()[0]
+            total = conn.execute(
+                f"SELECT COUNT(*) FROM rss_items WHERE {where}", params
+            ).fetchone()[0]
 
-                rows = conn.execute(
-                    """SELECT * FROM rss_items
-                       WHERE feed_id = ? AND crawl_time >= ?
-                       ORDER BY published_at DESC, crawl_time DESC
-                       LIMIT ? OFFSET ?""",
-                    (feed_id, since, page_size, offset),
-                ).fetchall()
-            else:
-                total = conn.execute(
-                    "SELECT COUNT(*) FROM rss_items WHERE crawl_time >= ?",
-                    (since,),
-                ).fetchone()[0]
-
-                rows = conn.execute(
-                    """SELECT * FROM rss_items
-                       WHERE crawl_time >= ?
-                       ORDER BY published_at DESC, crawl_time DESC
-                       LIMIT ? OFFSET ?""",
-                    (since, page_size, offset),
-                ).fetchall()
+            rows = conn.execute(
+                f"""SELECT * FROM rss_items
+                    WHERE {where}
+                    ORDER BY published_at DESC, crawl_time DESC
+                    LIMIT ? OFFSET ?""",
+                params + [page_size, offset],
+            ).fetchall()
 
             return {
                 "items": [dict(r) for r in rows],

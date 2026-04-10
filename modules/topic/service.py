@@ -7,7 +7,6 @@
 
 import logging
 import os
-import sqlite3
 from typing import Any
 
 import httpx
@@ -85,17 +84,10 @@ def semantic_search(query: str, top_k: int = 10) -> list[dict]:
 
 def _search_via_scheduler(query: str, top_k: int) -> list[dict]:
     """通过调度器 5001 端口代理"""
-    try:
-        resp = httpx.get(
-            "http://127.0.0.1:5001/semantic_search",
-            params={"q": query, "n": str(top_k)},
-            timeout=10,
-        )
-        results = resp.json()
-        if isinstance(results, list) and results:
-            return results
-    except Exception:
-        pass
+    from utils.scheduler_client import scheduler_get
+    result = scheduler_get("/semantic_search", params={"q": query, "n": str(top_k)}, timeout=10)
+    if result and isinstance(result, list):
+        return result
     return []
 
 
@@ -122,115 +114,28 @@ def _search_via_chromadb(query: str, top_k: int) -> list[dict]:
 
 
 def _search_via_sqlite(query: str, top_k: int) -> list[dict]:
-    """SQLite 关键词搜索：按相关度评分排序"""
-    # 核心词（用户输入的 keyword + industry）权重高，扩展词权重低
+    """通过 NewsDB 进行关键词搜索"""
     all_tokens = list(dict.fromkeys(t for t in query.split() if len(t) >= 2))
     if not all_tokens:
         return _latest_news(top_k)
 
-    # 前 2 个是核心词（industry, keyword），其余是扩展词
     core_tokens = all_tokens[:2]
-    expand_tokens = all_tokens[2:]
 
     try:
-        conn = sqlite3.connect("data/news.db")
-        conn.row_factory = sqlite3.Row
-
-        candidates = {}
-        for token in all_tokens:
-            rows = conn.execute(
-                "SELECT id, title, content, source_name, url, created_at, category "
-                "FROM news WHERE title LIKE ? OR content LIKE ? "
-                "ORDER BY id DESC LIMIT 50",
-                (f"%{token}%", f"%{token}%"),
-            ).fetchall()
-            for r in rows:
-                candidates[r["id"]] = r
-
-        conn.close()
-
-        if not candidates:
-            return _latest_news(top_k)
-
-        scored = []
-        for rid, r in candidates.items():
-            title = r["title"] or ""
-            content = r["content"] or ""
-
-            # 核心词匹配：标题+3, 内容+1
-            core_score = 0
-            for t in core_tokens:
-                if t in title: core_score += 3
-                if t in content: core_score += 1
-
-            # 扩展词匹配：标题+1, 内容+0.5
-            expand_score = 0
-            for t in expand_tokens:
-                if t in title: expand_score += 1
-                if t in content: expand_score += 0.5
-
-            total_score = core_score + expand_score
-
-            # 相似度：以核心词为基准
-            # 核心词满分 = len(core_tokens) * 4 (标题3+内容1)
-            core_max = len(core_tokens) * 4
-            core_ratio = min(core_score / core_max, 1.0) if core_max > 0 else 0
-
-            # 扩展词作为加分（最多+0.25）
-            expand_bonus = min(expand_score / 8, 0.25) if expand_tokens else 0
-
-            sim = round(min(core_ratio * 0.75 + expand_bonus + 0.25, 1.0), 2)
-            # 如果核心词完全没命中，大幅降权
-            if core_score == 0:
-                sim = round(sim * 0.3, 2)
-
-            scored.append((total_score, sim, r))
-
-        scored.sort(key=lambda x: -x[0])
-
-        return [
-            {
-                "id": r["id"],
-                "title": r["title"],
-                "content": r["content"],
-                "source_name": r["source_name"],
-                "url": r["url"],
-                "created_at": r["created_at"],
-                "category": r["category"],
-                "similarity": sim,
-            }
-            for _, sim, r in scored[:top_k]
-        ]
-
+        from modules.news.db import NewsDB
+        db = NewsDB()
+        return db.search_by_keywords(tokens=all_tokens, core_tokens=core_tokens, limit=top_k)
     except Exception as e:
-        logger.error("SQLite 关键词搜索失败: %s", e)
+        logger.error("关键词搜索失败: %s", e)
         return _latest_news(top_k)
 
 
 def _latest_news(top_k: int) -> list[dict]:
     """最终兜底：返回最新新闻"""
     try:
-        conn = sqlite3.connect("data/news.db")
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            "SELECT id, title, content, source_name, url, created_at, category "
-            "FROM news ORDER BY id DESC LIMIT ?",
-            (top_k,),
-        ).fetchall()
-        conn.close()
-        return [
-            {
-                "id": r["id"],
-                "title": r["title"],
-                "content": r["content"],
-                "source_name": r["source_name"],
-                "url": r["url"],
-                "created_at": r["created_at"],
-                "category": r["category"],
-                "similarity": 0.0,
-            }
-            for r in rows
-        ]
+        from modules.news.db import NewsDB
+        db = NewsDB()
+        return db.get_latest(limit=top_k)
     except Exception:
         return []
 
