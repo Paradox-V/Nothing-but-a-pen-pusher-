@@ -19,18 +19,59 @@ REMOTE_BASE = "/opt/news_aggregator"
 LOCAL_BASE = os.path.dirname(os.path.abspath(__file__))
 
 FILES = [
+    # 应用入口
     "app.py",
+    "scheduler.py",
     "config.yaml",
-    "templates/index.html",
+    # 依赖
+    "requirements.txt",
+    # 工具模块
+    "utils/__init__.py",
+    "utils/auth.py",
+    "utils/config.py",
+    "utils/crawl_trigger.py",
+    "utils/scheduler_client.py",
+    "utils/url_security.py",
+    "utils/time.py",
+    # AI 模块
+    "ai/__init__.py",
+    "ai/client.py",
+    "ai/config.py",
+    "ai/filter.py",
+    "ai/analyzer.py",
+    # 数据模块
+    "modules/__init__.py",
+    "modules/news/__init__.py",
+    "modules/news/routes.py",
+    "modules/news/db.py",
+    "modules/news/aggregator.py",
+    "modules/news/vector.py",
+    "modules/hotlist/__init__.py",
+    "modules/hotlist/routes.py",
+    "modules/hotlist/db.py",
+    "modules/hotlist/fetcher.py",
+    "modules/hotlist/vector.py",
+    "modules/rss/__init__.py",
+    "modules/rss/routes.py",
+    "modules/rss/db.py",
+    "modules/rss/fetcher.py",
+    "modules/rss/parser.py",
+    "modules/rss/discover.py",
+    "modules/rss/vector.py",
     "modules/topic/__init__.py",
+    "modules/topic/routes.py",
     "modules/topic/service.py",
     "modules/topic/title_gen.py",
-    "modules/topic/routes.py",
     "modules/creator/__init__.py",
+    "modules/creator/routes.py",
     "modules/creator/framework.py",
     "modules/creator/article.py",
     "modules/creator/image_gen.py",
-    "modules/creator/routes.py",
+    "modules/creator/db.py",
+    "modules/chat/__init__.py",
+    "modules/chat/routes.py",
+    "modules/chat/service.py",
+    "modules/chat/db.py",
 ]
 
 
@@ -72,20 +113,33 @@ def main():
 
     # 用 SFTP 上传到 /tmp
     sftp = ssh.open_sftp()
+
+    # 上传后端文件
     for f in FILES:
         local_path = os.path.join(LOCAL_BASE, f)
         if not os.path.exists(local_path):
             print(f"  跳过: {f}")
             continue
-
-        # 确保远程子目录存在
         remote_dir = os.path.dirname(f).replace("\\", "/")
         if remote_dir:
             ssh_exec(ssh, f"mkdir -p {TMP_DIR}/{remote_dir}")
-
         tmp_remote = f"{TMP_DIR}/{f}".replace("\\", "/")
         print(f"  上传: {f}")
         sftp.put(local_path, tmp_remote)
+
+    # 上传前端构建产物
+    frontend_dist = os.path.join(LOCAL_BASE, "frontend_dist")
+    if os.path.isdir(frontend_dist):
+        print("上传前端构建产物...")
+        for root, dirs, files_to_upload in os.walk(frontend_dist):
+            for fname in files_to_upload:
+                local_file = os.path.join(root, fname)
+                rel_path = os.path.relpath(local_file, LOCAL_BASE).replace("\\", "/")
+                remote_dir = os.path.dirname(rel_path).replace("\\", "/")
+                if remote_dir:
+                    ssh_exec(ssh, f"mkdir -p {TMP_DIR}/{remote_dir}")
+                print(f"  上传: {rel_path}")
+                sftp.put(local_file, f"{TMP_DIR}/{rel_path}")
 
     sftp.close()
 
@@ -98,12 +152,18 @@ def main():
         ssh_exec(ssh, f"cp {TMP_DIR}/{f} {REMOTE_BASE}/{f}", sudo=True)
         print(f"  已部署: {f}")
 
+    # 复制前端构建产物
+    if os.path.isdir(frontend_dist):
+        ssh_exec(ssh, f"mkdir -p {REMOTE_BASE}/frontend_dist/assets", sudo=True)
+        ssh_exec(ssh, f"cp -r {TMP_DIR}/frontend_dist/* {REMOTE_BASE}/frontend_dist/", sudo=True)
+        print("  已部署: frontend_dist/")
+
     # 清理临时文件
     ssh_exec(ssh, f"rm -rf {TMP_DIR}")
 
     # 安装依赖
     print("检查依赖...")
-    out, err = ssh_exec(ssh, "pip install litellm httpx -q 2>&1 | tail -3")
+    out, err = ssh_exec(ssh, f"cd {REMOTE_BASE} && pip install -r requirements.txt -q 2>&1 | tail -3")
     if out.strip():
         print(f"  {out.strip()}")
 
