@@ -130,5 +130,17 @@ class ChatDB:
         return [dict(r) for r in rows]
 
     def get_recent_messages(self, session_id: str, limit: int = 20) -> list[dict]:
-        """获取最近的 N 条消息（用于构建对话历史上下文）。"""
-        return self.get_messages(session_id, limit)
+        """获取最近的 N 条消息（用于构建对话历史上下文）。
+
+        先按时间倒序取最新 N 条，再反转为正序（符合对话时序）。
+        """
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT id, role, content, sources, created_at "
+            "FROM chat_messages WHERE session_id = ? "
+            "ORDER BY created_at DESC, id DESC LIMIT ?",
+            (session_id, limit),
+        ).fetchall()
+        conn.close()
+        # 反转为时间正序（最早→最新），符合对话上下文顺序
+        return list(reversed([dict(r) for r in rows]))

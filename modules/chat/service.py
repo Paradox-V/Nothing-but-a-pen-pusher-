@@ -67,7 +67,7 @@ class ChatService:
         # 3. 格式化检索上下文
         context = self._format_context(search_results)
 
-        # 4. 加载对话历史（最近 10 轮 = 20 条消息）
+        # 4. 加载对话历史（最近 20 条消息）
         history = self.db.get_recent_messages(session_id, limit=20)
 
         # 5. 构建消息列表
