@@ -4,8 +4,8 @@
 六模块：新闻汇总 + 热榜 + RSS订阅 + 热点选题 + 文案创作 + 智能问答
 """
 import sqlite3
-import webbrowser
-from flask import Flask, render_template, jsonify
+import os
+from flask import Flask, send_from_directory, jsonify
 from utils.config import load_config
 from modules.news.routes import news_bp
 from modules.hotlist.routes import hotlist_bp
@@ -14,8 +14,11 @@ from modules.topic.routes import topic_bp
 from modules.creator.routes import creator_bp
 from modules.chat.routes import chat_bp
 
-app = Flask(__name__, static_folder="static")
-app.config["JSON_AS_ASCII"] = False  # 中文不转义
+# React 构建产物目录
+_REACT_DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontend_dist")
+
+app = Flask(__name__, static_folder=os.path.join(_REACT_DIST, "assets"))
+app.config["JSON_AS_ASCII"] = False
 
 # 加载全局配置
 _config = load_config()
@@ -39,7 +42,20 @@ app.register_blueprint(chat_bp)
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return send_from_directory(_REACT_DIST, "index.html")
+
+
+@app.route("/<path:path>", methods=["GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
+def spa_fallback(path):
+    """React SPA fallback: 非 API、非文件路由返回 index.html"""
+    # /api/* 未命中任何已注册路由时，返回 JSON 404 而非前端 HTML
+    if path.startswith("api/"):
+        return jsonify({"error": "API endpoint not found", "path": f"/{path}"}), 404
+
+    file_path = os.path.join(_REACT_DIST, path)
+    if os.path.isfile(file_path):
+        return send_from_directory(_REACT_DIST, path)
+    return send_from_directory(_REACT_DIST, "index.html")
 
 
 @app.route("/api/status")
@@ -53,13 +69,16 @@ def api_status():
     try:
         news_db = NewsDB()
         count = news_db.get_count()
+        status["news_count"] = count
         status["news"] = {"count": count, "available": True}
     except (sqlite3.DatabaseError, sqlite3.OperationalError, OSError):
+        status["news_count"] = 0
         status["news"] = {"count": 0, "available": False}
 
     try:
         hotlist_db = HotlistDB()
         last_crawl = hotlist_db.get_last_crawl_time()
+        status["hotlist_last_crawl"] = last_crawl
         status["hotlist"] = {"last_crawl": last_crawl, "available": True}
     except (sqlite3.DatabaseError, sqlite3.OperationalError, OSError):
         status["hotlist"] = {"available": False}
@@ -67,15 +86,19 @@ def api_status():
     try:
         rss_db = RSSDB()
         feeds = rss_db.get_feeds()
+        status["rss_feed_count"] = len(feeds)
         status["rss"] = {"feed_count": len(feeds), "available": True}
     except (sqlite3.DatabaseError, sqlite3.OperationalError, OSError):
+        status["rss_feed_count"] = 0
         status["rss"] = {"available": False}
 
     # AI 模块状态
     try:
         from ai import AI_AVAILABLE
+        status["ai_available"] = AI_AVAILABLE
         status["ai"] = {"available": AI_AVAILABLE}
     except (ImportError, ModuleNotFoundError):
+        status["ai_available"] = False
         status["ai"] = {"available": False}
 
     return jsonify(status)
@@ -91,7 +114,7 @@ def scheduler_health():
 
 if __name__ == "__main__":
     import argparse
-    import os
+    import webbrowser
 
     # 加载 .env 环境变量
     try:
