@@ -28,17 +28,25 @@ def api_framework_create():
     """
     创建文案框架。
 
-    请求体: {"title": "...", "requirements": "...", "industry": "...", "keyword": "..."}
+    请求体: {"title": "...", "requirements": "...", "industry": "...", "keyword": "...",
+             "topic_summary": "...", "source": "..."}
     """
     data = request.get_json(force=True)
     title = data.get("title", "")
     if not title:
         return jsonify({"error": "请提供标题"}), 400
 
+    # 将 topic_summary/source 拼入 requirements，让 AI 框架生成时能看到完整背景
+    requirements = data.get("requirements", "")
+    topic_summary = data.get("topic_summary", "")
+    source = data.get("source", "")
+    if topic_summary:
+        requirements = f"素材摘要：{topic_summary}\n来源：{source}\n{requirements}"
+
     try:
         fw = create_framework(
             title=title,
-            requirements=data.get("requirements", ""),
+            requirements=requirements,
             industry=data.get("industry", ""),
             keyword=data.get("keyword", ""),
         )
