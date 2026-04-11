@@ -67,6 +67,7 @@ def get_feeds():
 
 
 @rss_bp.route("/api/rss/feeds", methods=["POST"])
+@require_auth
 def add_feed():
     """
     添加 RSS 源
@@ -105,6 +106,7 @@ def add_feed():
 
 
 @rss_bp.route("/api/rss/feeds/<feed_id>", methods=["PUT"])
+@require_auth
 def update_feed(feed_id: str):
     """
     更新 RSS 源
@@ -128,6 +130,12 @@ def update_feed(feed_id: str):
     for key in allowed:
         if key in data:
             kwargs[key] = data[key]
+
+    # 如果更新了 URL，需要重新校验
+    if "url" in kwargs:
+        is_safe, url_error = validate_url(kwargs["url"])
+        if not is_safe:
+            return jsonify({"success": False, "error": f"URL 校验失败: {url_error}"}), 400
 
     if not kwargs:
         return jsonify({"success": False, "error": "没有有效的更新字段"}), 400
@@ -164,6 +172,7 @@ def delete_feed(feed_id: str):
 
 
 @rss_bp.route("/api/rss/fetch", methods=["POST"])
+@require_auth
 def fetch_feeds():
     """触发 RSS 抓取信号，scheduler 执行。"""
     from utils.crawl_trigger import CrawlTrigger
@@ -176,6 +185,7 @@ def fetch_feeds():
 
 
 @rss_bp.route("/api/rss/discover", methods=["POST"])
+@require_auth
 def discover_feed():
     """根据网站 URL 发现可订阅的 RSS 源"""
     data = request.get_json(silent=True)
@@ -204,6 +214,7 @@ def discover_feed():
 
 
 @rss_bp.route("/api/rss/discover/custom", methods=["POST"])
+@require_auth
 def custom_discover_feed():
     """使用自定义 CSS 选择器生成 RSS 源"""
     data = request.get_json(silent=True)

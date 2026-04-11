@@ -15,6 +15,7 @@ from modules.creator.framework import (
     update_framework,
 )
 from modules.creator.article import start_article_generation, get_task_status
+from utils.auth import require_auth
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ creator_bp = Blueprint("creator", __name__)
 
 
 @creator_bp.route("/api/creator/framework/create", methods=["POST"])
+@require_auth
 def api_framework_create():
     """
     创建文案框架。
@@ -56,6 +58,7 @@ def api_framework_get(fw_id: str):
 
 
 @creator_bp.route("/api/creator/framework/<fw_id>/update", methods=["POST"])
+@require_auth
 def api_framework_update(fw_id: str):
     """
     对话调整框架。
@@ -82,6 +85,7 @@ def api_framework_update(fw_id: str):
 
 
 @creator_bp.route("/api/creator/framework/<fw_id>/save", methods=["POST"])
+@require_auth
 def api_framework_save(fw_id: str):
     """直接保存用户手动编辑的框架内容"""
     fw = get_framework(fw_id)
@@ -100,6 +104,7 @@ def api_framework_save(fw_id: str):
 
 
 @creator_bp.route("/api/creator/framework/<fw_id>/confirm", methods=["POST"])
+@require_auth
 def api_framework_confirm(fw_id: str):
     """确认框架"""
     fw = get_framework(fw_id)
@@ -111,6 +116,7 @@ def api_framework_confirm(fw_id: str):
 
 
 @creator_bp.route("/api/creator/framework/<fw_id>/generate", methods=["POST"])
+@require_auth
 def api_article_generate(fw_id: str):
     """
     根据框架生成文章 + 配图。

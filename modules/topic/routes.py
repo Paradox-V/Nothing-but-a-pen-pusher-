@@ -15,6 +15,7 @@ from modules.topic.service import (
     semantic_search,
 )
 from modules.topic.title_gen import generate_titles
+from utils.auth import require_auth
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ def api_industries():
 
 
 @topic_bp.route("/api/topic/generate", methods=["POST"])
+@require_auth
 def api_generate():
     """
     生成选题建议。

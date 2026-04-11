@@ -10,6 +10,7 @@ import logging
 from flask import Blueprint, jsonify, request
 
 from modules.news.db import NewsDB
+from utils.auth import require_auth
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +97,7 @@ def api_categories():
 
 
 @news_bp.route("/api/news/fetch", methods=["POST"])
+@require_auth
 def api_fetch():
     """触发新闻采集。通过信号通知 scheduler 执行，避免并发冲突。"""
     from utils.crawl_trigger import CrawlTrigger
