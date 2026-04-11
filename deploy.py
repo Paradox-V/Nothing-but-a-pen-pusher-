@@ -1,4 +1,4 @@
-"""部署脚本：上传新模块到服务器并重启 gunicorn
+"""部署脚本：上传新模块到服务器并重启 gunicorn + scheduler
 
 配置通过环境变量读取，不再硬编码凭据：
   DEPLOY_HOST     - 服务器地址
@@ -178,12 +178,25 @@ def main():
     )
     time.sleep(3)
 
+    # 重启 scheduler（向量搜索 + 定时采集）
+    print("重启 scheduler...")
+    ssh_exec(ssh, "pkill -f 'python.*scheduler.py' 2>/dev/null", sudo=True)
+    time.sleep(1)
+    ssh.exec_command(
+        f"cd {REMOTE_BASE} && nohup python scheduler.py "
+        "> /tmp/scheduler.log 2>&1 &"
+    )
+    time.sleep(3)
+
     # 验证
     out, _ = ssh_exec(ssh, "curl -s http://localhost:5000/api/status")
     print(f"状态: {out[:300]}")
 
     out, _ = ssh_exec(ssh, "ps aux | grep 'gunicorn.*app:app' | grep -v grep")
     print(f"进程:\n{out}")
+
+    out, _ = ssh_exec(ssh, "ps aux | grep 'scheduler.py' | grep -v grep")
+    print(f"Scheduler:\n{out}")
 
     # 检查新模块 API
     out, _ = ssh_exec(ssh, "curl -s http://localhost:5000/api/topic/industries")
