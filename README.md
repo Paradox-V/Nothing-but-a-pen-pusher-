@@ -20,7 +20,7 @@
 - **向量引擎**: ChromaDB + sentence-transformers (BAAI/bge-small-zh-v1.5)
 - **AI**: LiteLLM + DeepSeek-V3（聊天、选题、文案）
 - **RSS 生成**: 自建 RSSHub Docker 实例
-- **前端**: 原生 HTML/CSS/JS 单页应用（暗色主题）
+- **前端**: React + TypeScript + Vite 单页应用（暗色主题 + 复古主题）
 - **部署**: Ubuntu + Nginx + systemd
 
 ## 项目结构
@@ -77,7 +77,8 @@
 │   └── js/app.js               # 前端逻辑
 ├── templates/
 │   └── index.html              # 主页面
-├── frontend/                   # React 前端（实验性，暂未启用）
+├── frontend/                   # React + TypeScript 前端源码
+├── frontend_dist/              # React 构建产物（生产部署用）
 └── tests/                      # 测试目录
 ```
 

@@ -9,5 +9,4 @@ dist/
 build/
 news.db
 chroma_db/
-frontend/
 docs/
