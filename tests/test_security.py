@@ -85,7 +85,10 @@ class TestAuthDecorator:
         if flask_env:
             env["FLASK_ENV"] = flask_env
 
-        with patch.dict(os.environ, env, clear=False):
+        with patch.dict(os.environ, env, clear=False) as patched:
+            # 确保测试中未指定 ADMIN_TOKEN 时，环境中也不存在
+            if "ADMIN_TOKEN" not in env:
+                patched.pop("ADMIN_TOKEN", None)
             with app.test_client() as client:
                 headers = {}
                 if auth_header is not None:
