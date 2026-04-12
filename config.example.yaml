@@ -4,6 +4,11 @@ scheduler:
   rss_interval: 1800
   purge_days: 7
 
+archive:
+  enabled: false              # 启用热/冷归档（生产环境设为 true）
+  archive_days: 7             # 超过 N 天的数据迁移到冷库
+  retention_days: 180         # 冷库数据保留 N 天后清理
+
 hotlist:
   platforms:
     - weibo

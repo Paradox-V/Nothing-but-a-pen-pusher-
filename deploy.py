@@ -72,6 +72,10 @@ FILES = [
     "modules/chat/routes.py",
     "modules/chat/service.py",
     "modules/chat/db.py",
+    # 归档模块
+    "modules/archive/__init__.py",
+    "modules/archive/manager.py",
+    "modules/archive/routes.py",
 ]
 
 
@@ -167,36 +171,28 @@ def main():
     if out.strip():
         print(f"  {out.strip()}")
 
-    # 重启 gunicorn
-    print("重启 gunicorn...")
-    ssh_exec(ssh, "pkill -f 'gunicorn.*app:app'", sudo=True)
-    time.sleep(2)
-    # 用 ubuntu 用户启动 gunicorn
-    ssh.exec_command(
-        f"cd {REMOTE_BASE} && nohup gunicorn --workers 1 --threads 4 "
-        "--bind 0.0.0.0:5000 --timeout 120 app:app > /tmp/gunicorn.log 2>&1 &"
-    )
+    # 通过 systemctl 重启服务
+    print("重启 news-viewer (gunicorn)...")
+    out, err = ssh_exec(ssh, "systemctl restart news-viewer", sudo=True)
+    if err.strip():
+        print(f"  warning: {err.strip()}")
     time.sleep(3)
 
-    # 重启 scheduler（向量搜索 + 定时采集）
-    print("重启 scheduler...")
-    ssh_exec(ssh, "pkill -f 'python.*scheduler.py' 2>/dev/null", sudo=True)
-    time.sleep(1)
-    ssh.exec_command(
-        f"cd {REMOTE_BASE} && nohup python scheduler.py "
-        "> /tmp/scheduler.log 2>&1 &"
-    )
+    print("重启 news-scheduler...")
+    out, err = ssh_exec(ssh, "systemctl restart news-scheduler", sudo=True)
+    if err.strip():
+        print(f"  warning: {err.strip()}")
     time.sleep(3)
 
     # 验证
     out, _ = ssh_exec(ssh, "curl -s http://localhost:5000/api/status")
     print(f"状态: {out[:300]}")
 
-    out, _ = ssh_exec(ssh, "ps aux | grep 'gunicorn.*app:app' | grep -v grep")
-    print(f"进程:\n{out}")
+    out, _ = ssh_exec(ssh, "systemctl is-active news-viewer")
+    print(f"news-viewer: {out.strip()}")
 
-    out, _ = ssh_exec(ssh, "ps aux | grep 'scheduler.py' | grep -v grep")
-    print(f"Scheduler:\n{out}")
+    out, _ = ssh_exec(ssh, "systemctl is-active news-scheduler")
+    print(f"news-scheduler: {out.strip()}")
 
     # 检查新模块 API
     out, _ = ssh_exec(ssh, "curl -s http://localhost:5000/api/topic/industries")

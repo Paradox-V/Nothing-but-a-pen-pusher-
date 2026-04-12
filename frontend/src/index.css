@@ -1,0 +1,211 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-heading: var(--font-sans);
+  --radius: 0.75rem;
+
+  --color-background: var(--bg);
+  --color-foreground: var(--fg);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-fg);
+  --color-popover: var(--card);
+  --color-popover-foreground: var(--card-fg);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-fg);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-fg);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-fg);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-fg);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-sidebar-ring: var(--ring);
+  --color-sidebar-border: var(--border);
+  --color-sidebar-accent-foreground: var(--fg);
+  --color-sidebar-accent: var(--muted);
+  --color-sidebar-primary-foreground: var(--primary-fg);
+  --color-sidebar-primary: var(--accent);
+  --color-sidebar-foreground: var(--fg);
+  --color-sidebar: var(--sidebar);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+}
+
+/* ===== MIDNIGHT (default) ===== */
+:root {
+  --bg: #000000;
+  --fg: #fafafa;
+  --card: #111113;
+  --card-fg: #fafafa;
+  --primary: #ffffff;
+  --primary-fg: #000000;
+  --secondary: #1c1c1e;
+  --secondary-fg: #fafafa;
+  --muted: #1c1c1e;
+  --muted-fg: #8e8e93;
+  --accent: #0a84ff;
+  --accent-fg: #ffffff;
+  --destructive: #ff453a;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.08);
+  --ring: #0a84ff;
+  --sidebar: #0a0a0b;
+  --chart-1: #0a84ff;
+  --chart-2: #5e5ce6;
+  --chart-3: #30d158;
+  --chart-4: #ff9f0a;
+  --chart-5: #ff375f;
+
+  /* shadcn compatibility */
+  --background: #000000;
+  --foreground: #fafafa;
+  --card: #111113;
+  --card-foreground: #fafafa;
+  --popover: #111113;
+  --popover-foreground: #fafafa;
+  --primary: #ffffff;
+  --primary-foreground: #000000;
+  --secondary: #1c1c1e;
+  --secondary-foreground: #fafafa;
+  --muted: #1c1c1e;
+  --muted-foreground: #8e8e93;
+  --accent: #0a84ff;
+  --accent-foreground: #ffffff;
+  --destructive: #ff453a;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.08);
+  --ring: #0a84ff;
+  --sidebar: #0a0a0b;
+  --sidebar-foreground: #fafafa;
+  --sidebar-primary: #0a84ff;
+  --sidebar-primary-foreground: #000000;
+  --sidebar-accent: #1c1c1e;
+  --sidebar-accent-foreground: #fafafa;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-ring: #0a84ff;
+  --chart-1: #0a84ff;
+  --chart-2: #5e5ce6;
+  --chart-3: #30d158;
+  --chart-4: #ff9f0a;
+  --chart-5: #ff375f;
+}
+
+/* ===== VINTAGE ===== */
+:root[data-theme="vintage"] {
+  --bg: #E8E9E4;
+  --fg: #2C2E31;
+  --card: #DDDED8;
+  --card-fg: #2C2E31;
+  --primary: #2C2E31;
+  --primary-fg: #E8E9E4;
+  --secondary: #D2D3CD;
+  --secondary-fg: #2C2E31;
+  --muted: #D2D3CD;
+  --muted-fg: #6B6D70;
+  --accent: #4F7942;
+  --accent-fg: #ffffff;
+  --destructive: #B5453A;
+  --border: rgba(44, 46, 49, 0.10);
+  --input: rgba(44, 46, 49, 0.10);
+  --ring: #4F7942;
+  --sidebar: #DDDED8;
+  --chart-1: #4F7942;
+  --chart-2: #5B6AAF;
+  --chart-3: #6A9E5C;
+  --chart-4: #B8862D;
+  --chart-5: #A84860;
+
+  /* shadcn compatibility */
+  --background: #E8E9E4;
+  --foreground: #2C2E31;
+  --card: #DDDED8;
+  --card-foreground: #2C2E31;
+  --popover: #DDDED8;
+  --popover-foreground: #2C2E31;
+  --primary: #2C2E31;
+  --primary-foreground: #E8E9E4;
+  --secondary: #D2D3CD;
+  --secondary-foreground: #2C2E31;
+  --muted: #D2D3CD;
+  --muted-foreground: #6B6D70;
+  --accent: #4F7942;
+  --accent-foreground: #ffffff;
+  --destructive: #B5453A;
+  --border: rgba(44, 46, 49, 0.10);
+  --input: rgba(44, 46, 49, 0.10);
+  --ring: #4F7942;
+  --sidebar: #DDDED8;
+  --sidebar-foreground: #2C2E31;
+  --sidebar-primary: #4F7942;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #D2D3CD;
+  --sidebar-accent-foreground: #2C2E31;
+  --sidebar-border: rgba(44, 46, 49, 0.10);
+  --sidebar-ring: #4F7942;
+  --chart-1: #4F7942;
+  --chart-2: #5B6AAF;
+  --chart-3: #6A9E5C;
+  --chart-4: #B8862D;
+  --chart-5: #A84860;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground font-sans;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  html {
+    scroll-behavior: smooth;
+  }
+  select {
+    @apply bg-card text-foreground cursor-pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 32px;
+  }
+  option {
+    @apply bg-card text-foreground;
+  }
+  /* Vintage theme select arrow */
+  :root[data-theme="vintage"] select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%234F7942' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  }
+}
+
+/* ===== Matte noise texture overlay ===== */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.028;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 200px 200px;
+}

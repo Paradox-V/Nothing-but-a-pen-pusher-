@@ -27,20 +27,22 @@ class RSSVectorEngine:
         self._initialized = False
 
     def initialize(self, chroma_client: chromadb.PersistentClient,
-                   encode_fn=None) -> None:
+                   encode_fn=None, collection_name: str | None = None) -> None:
         """初始化（复用调度器已加载的 ChromaDB 客户端和嵌入模型）。
 
         Args:
             chroma_client: 已创建的 ChromaDB PersistentClient
             encode_fn: 嵌入函数，签名 (texts: list[str]) -> list[list[float]]
+            collection_name: ChromaDB collection 名称，默认使用 COLLECTION_NAME
         """
         if self._initialized:
             return
 
         self.chroma_client = chroma_client
         self._encode_fn = encode_fn
+        name = collection_name or self.COLLECTION_NAME
         self.collection = self.chroma_client.get_or_create_collection(
-            name=self.COLLECTION_NAME,
+            name=name,
             metadata={"hnsw:space": "cosine"},
         )
         logger.info("RSS 向量引擎就绪，已有 %d 条向量", self.collection.count())

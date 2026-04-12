@@ -327,3 +327,32 @@ class HotlistDB:
         conn.commit()
         conn.close()
         return deleted
+
+    # ── 归档辅助 ────────────────────────────────────────────
+
+    def get_archive_candidates(self, cutoff, limit=500):
+        """获取 crawl_time 早于 cutoff 的记录（归档候选），按 id 升序。"""
+        conn = self._get_conn()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM hot_items WHERE crawl_time < ? ORDER BY id LIMIT ?",
+                (cutoff, limit),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def delete_by_ids(self, ids):
+        """按 id 列表批量删除记录，返回删除条数。"""
+        if not ids:
+            return 0
+        conn = self._get_conn()
+        try:
+            placeholders = ",".join("?" * len(ids))
+            cur = conn.execute(
+                f"DELETE FROM hot_items WHERE id IN ({placeholders})", ids
+            )
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()

@@ -29,6 +29,7 @@ from modules.rss.db import RSSDB
 from modules.rss.fetcher import RSSFetcher
 from modules.hotlist.vector import HotlistVectorEngine
 from modules.rss.vector import RSSVectorEngine
+from modules.archive.manager import ArchiveManager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,11 +54,18 @@ class _VectorAPIHandler(BaseHTTPRequestHandler):
     vector_engine: NewsVectorEngine | None = None
     hotlist_vector: HotlistVectorEngine | None = None
     rss_vector: RSSVectorEngine | None = None
+    archive_manager = None  # ArchiveManager instance
 
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == "/semantic_search":
             self._handle_search(parsed)
+        elif parsed.path == "/archive/news":
+            self._handle_archive_news(parsed)
+        elif parsed.path == "/archive/hotlist":
+            self._handle_archive_hotlist(parsed)
+        elif parsed.path == "/archive/rss":
+            self._handle_archive_rss(parsed)
         elif parsed.path == "/health":
             self._json({"ok": True, "model_loaded": self.vector_engine is not None})
         else:
@@ -89,6 +97,16 @@ class _VectorAPIHandler(BaseHTTPRequestHandler):
         results = self.vector_engine.semantic_search(
             query=query, n=n, categories=categories, sources=sources,
         )
+
+        # 冷库回查：热库 0 结果时查冷库
+        if not results and self.archive_manager and self.archive_manager._vector_ready:
+            try:
+                results = self.archive_manager.semantic_search_news(query, n=n)
+                for r in results:
+                    r["source_name"] = (r.get("source_name", "") + " [archive]").strip()
+            except Exception as e:
+                logger.warning("冷库语义搜索回查失败: %s", e)
+
         self._json(results)
 
     def _handle_chat_search(self):
@@ -155,6 +173,47 @@ class _VectorAPIHandler(BaseHTTPRequestHandler):
 
         self._json(deduped[:10])
 
+    # ── 冷库浏览接口 ─────────────────────────────────────────
+
+    def _handle_archive_news(self, parsed):
+        if not self.archive_manager:
+            self._json({"error": "archive not enabled"}, 503)
+            return
+        params = parse_qs(parsed.query)
+        result = self.archive_manager.search_news(
+            keyword=params.get("keyword", [None])[0],
+            date_from=params.get("date_from", [None])[0],
+            date_to=params.get("date_to", [None])[0],
+            page=int(params.get("page", ["1"])[0]),
+            per_page=int(params.get("per_page", ["30"])[0]),
+        )
+        self._json(result)
+
+    def _handle_archive_hotlist(self, parsed):
+        if not self.archive_manager:
+            self._json({"error": "archive not enabled"}, 503)
+            return
+        params = parse_qs(parsed.query)
+        result = self.archive_manager.search_hotlist(
+            platform=params.get("platform", [None])[0],
+            page=int(params.get("page", ["1"])[0]),
+            per_page=int(params.get("per_page", ["30"])[0]),
+        )
+        self._json(result)
+
+    def _handle_archive_rss(self, parsed):
+        if not self.archive_manager:
+            self._json({"error": "archive not enabled"}, 503)
+            return
+        params = parse_qs(parsed.query)
+        result = self.archive_manager.search_rss(
+            feed_id=params.get("feed_id", [None])[0],
+            keyword=params.get("keyword", [None])[0],
+            page=int(params.get("page", ["1"])[0]),
+            per_page=int(params.get("per_page", ["30"])[0]),
+        )
+        self._json(result)
+
     def _json(self, data, status=200):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
@@ -178,11 +237,12 @@ def _jaccard_similarity(a: str, b: str) -> float:
     return intersection / union if union > 0 else 0.0
 
 
-def _start_vector_api(vector_engine, hotlist_vector=None, rss_vector=None):
+def _start_vector_api(vector_engine, hotlist_vector=None, rss_vector=None, archive_manager=None):
     """在后台线程启动向量搜索 API（仅监听 localhost）"""
     _VectorAPIHandler.vector_engine = vector_engine
     _VectorAPIHandler.hotlist_vector = hotlist_vector
     _VectorAPIHandler.rss_vector = rss_vector
+    _VectorAPIHandler.archive_manager = archive_manager
     server = _ThreadingHTTPServer(("127.0.0.1", VECTOR_API_PORT), _VectorAPIHandler)
     t = threading.Thread(target=server.serve_forever, daemon=True)
     t.start()
@@ -243,7 +303,23 @@ def main():
         except Exception as e:
             logger.error("RSS 向量引擎初始化失败: %s", e)
 
-        _start_vector_api(vector_engine, hotlist_vector, rss_vector)
+    # --- 归档模块 ---
+    archive_manager = None
+    archive_cfg = config.get("archive", {})
+    if archive_cfg.get("enabled"):
+        try:
+            archive_manager = ArchiveManager(
+                archive_dir="data/archive",
+                archive_days=archive_cfg.get("archive_days", purge_days),
+                retention_days=archive_cfg.get("retention_days", 180),
+            )
+            if vector_engine:
+                archive_manager.initialize_vectors(vector_engine._encode)
+            logger.info("归档管理器初始化完成")
+        except Exception as e:
+            logger.error("归档管理器初始化失败: %s", e)
+
+    _start_vector_api(vector_engine, hotlist_vector, rss_vector, archive_manager=archive_manager)
 
     # --- 代理配置 ---
     proxy_url = config.get("proxy", {}).get("url")
@@ -275,14 +351,26 @@ def main():
         _run_module(module, news_db, aggregator, vector_engine,
                     hotlist_db, hotlist_fetcher, hotlist_cfg,
                     rss_db, rss_fetcher, purge_days,
-                    hotlist_vector=hotlist_vector, rss_vector=rss_vector)
+                    hotlist_vector=hotlist_vector, rss_vector=rss_vector,
+                    archive_manager=archive_manager)
 
     # 加载抓取触发器
     from utils.crawl_trigger import CrawlTrigger
     crawl_trigger = CrawlTrigger()
 
+    # Scheduler 心跳文件，供 Web 层判断 scheduler 是否在线
+    heartbeat_path = "data/.scheduler_heartbeat"
+    os.makedirs("data", exist_ok=True)
+
     while True:
         time.sleep(1)
+
+        # 更新心跳
+        try:
+            with open(heartbeat_path, "w") as f:
+                f.write(datetime.now().isoformat())
+        except Exception:
+            pass
 
         # 检查 Web 触发的抓取信号
         try:
@@ -292,7 +380,8 @@ def main():
                 _run_module(module, news_db, aggregator, vector_engine,
                             hotlist_db, hotlist_fetcher, hotlist_cfg,
                             rss_db, rss_fetcher, purge_days,
-                            hotlist_vector=hotlist_vector, rss_vector=rss_vector)
+                            hotlist_vector=hotlist_vector, rss_vector=rss_vector,
+                            archive_manager=archive_manager)
                 crawl_trigger.mark_done(module)
         except Exception as e:
             logger.error("处理抓取信号失败: %s", e)
@@ -305,38 +394,48 @@ def main():
                 _run_module(module, news_db, aggregator, vector_engine,
                             hotlist_db, hotlist_fetcher, hotlist_cfg,
                             rss_db, rss_fetcher, purge_days,
-                            hotlist_vector=hotlist_vector, rss_vector=rss_vector)
+                            hotlist_vector=hotlist_vector, rss_vector=rss_vector,
+                            archive_manager=archive_manager)
 
 
 def _run_module(module, news_db, aggregator, vector_engine,
                 hotlist_db, hotlist_fetcher, hotlist_cfg,
                 rss_db, rss_fetcher, purge_days,
-                hotlist_vector=None, rss_vector=None):
+                hotlist_vector=None, rss_vector=None, archive_manager=None):
     """运行单个模块的采集，失败不影响其他模块"""
     try:
         if module == "news":
-            _run_news(news_db, aggregator, vector_engine, purge_days)
+            _run_news(news_db, aggregator, vector_engine, purge_days,
+                      archive_manager=archive_manager)
         elif module == "hotlist":
             _run_hotlist(hotlist_db, hotlist_fetcher, hotlist_cfg,
-                         hotlist_vector=hotlist_vector)
+                         hotlist_vector=hotlist_vector,
+                         archive_manager=archive_manager)
         elif module == "rss":
             _run_rss(rss_db, rss_fetcher, purge_days,
-                     rss_vector=rss_vector)
+                     rss_vector=rss_vector, archive_manager=archive_manager)
     except Exception as e:
         logger.error("%s 采集异常: %s", module, e)
 
 
-def _run_news(db, aggregator, vector_engine, purge_days):
+def _run_news(db, aggregator, vector_engine, purge_days, archive_manager=None):
     """新闻采集 + 向量处理"""
-    result = aggregator.fetch_and_store(purge_days=purge_days)
+    skip_purge = archive_manager is not None
+    result = aggregator.fetch_and_store(purge_days=purge_days, skip_purge=skip_purge)
     new_items = result.get("new_items", [])
     new_row_ids = result.get("new_row_ids", [])
 
     if vector_engine and new_items:
         _vector_pipeline(vector_engine, db, new_items, new_row_ids)
 
-    # 同步清理 ChromaDB
-    if vector_engine and result["purged"] > 0:
+    # 归档迁移（替代 purge）
+    if archive_manager:
+        try:
+            archive_manager._migrate_news(db, vector_engine)
+        except Exception as e:
+            logger.error("新闻归档迁移失败: %s", e)
+    elif vector_engine and result["purged"] > 0:
+        # 无归档模式：保留原有 ChromaDB 同步清理
         try:
             vector_engine.sync_chroma_purge()
         except Exception as e:
@@ -402,7 +501,7 @@ def _vector_pipeline(vector_engine, db, items, row_ids):
         logger.error("向量处理管线异常: %s", e)
 
 
-def _run_hotlist(db, fetcher, config, hotlist_vector=None):
+def _run_hotlist(db, fetcher, config, hotlist_vector=None, archive_manager=None):
     """热榜采集 + 向量化"""
     platforms = config.get("platforms") or None
     items, failed = fetcher.fetch_all_platforms(platforms)
@@ -427,17 +526,22 @@ def _run_hotlist(db, fetcher, config, hotlist_vector=None):
         except Exception as e:
             logger.error("热榜向量化失败: %s", e)
 
-    # 清理过期数据
-    purged = db.purge_old(days=7)
-    # 同步 ChromaDB 清理
-    if hotlist_vector and hotlist_vector._initialized and purged > 0:
+    # 清理过期数据（归档模式用迁移替代，否则硬删）
+    if archive_manager:
         try:
-            conn = db._get_conn()
-            existing_ids = {r[0] for r in conn.execute("SELECT id FROM hot_items").fetchall()}
-            conn.close()
-            hotlist_vector.sync_purge(existing_ids)
+            archive_manager._migrate_hotlist(db, hotlist_vector)
         except Exception as e:
-            logger.error("热榜 ChromaDB 清理失败: %s", e)
+            logger.error("热榜归档迁移失败: %s", e)
+    else:
+        purged = db.purge_old(days=7)
+        if hotlist_vector and hotlist_vector._initialized and purged > 0:
+            try:
+                conn = db._get_conn()
+                existing_ids = {r[0] for r in conn.execute("SELECT id FROM hot_items").fetchall()}
+                conn.close()
+                hotlist_vector.sync_purge(existing_ids)
+            except Exception as e:
+                logger.error("热榜 ChromaDB 清理失败: %s", e)
 
     logger.info("热榜: 抓取%d条, 新增%d条, 更新%d条, 失败%d平台",
                 len(items), new_count,
@@ -445,7 +549,7 @@ def _run_hotlist(db, fetcher, config, hotlist_vector=None):
                 len(failed))
 
 
-def _run_rss(db, fetcher, purge_days, rss_vector=None):
+def _run_rss(db, fetcher, purge_days, rss_vector=None, archive_manager=None):
     """RSS 采集 + 向量化"""
     result = fetcher.fetch_and_store(db)
 
@@ -465,17 +569,22 @@ def _run_rss(db, fetcher, purge_days, rss_vector=None):
         except Exception as e:
             logger.error("RSS 向量化失败: %s", e)
 
-    # 清理过期数据
-    purged = db.purge_old(days=purge_days)
-    # 同步 ChromaDB 清理
-    if rss_vector and rss_vector._initialized and purged > 0:
+    # 清理过期数据（归档模式用迁移替代，否则硬删）
+    if archive_manager:
         try:
-            conn = db._get_conn()
-            existing_ids = {r[0] for r in conn.execute("SELECT id FROM rss_items").fetchall()}
-            conn.close()
-            rss_vector.sync_purge(existing_ids)
+            archive_manager._migrate_rss(db, rss_vector)
         except Exception as e:
-            logger.error("RSS ChromaDB 清理失败: %s", e)
+            logger.error("RSS 归档迁移失败: %s", e)
+    else:
+        purged = db.purge_old(days=purge_days)
+        if rss_vector and rss_vector._initialized and purged > 0:
+            try:
+                conn = db._get_conn()
+                existing_ids = {r[0] for r in conn.execute("SELECT id FROM rss_items").fetchall()}
+                conn.close()
+                rss_vector.sync_purge(existing_ids)
+            except Exception as e:
+                logger.error("RSS ChromaDB 清理失败: %s", e)
 
     logger.info(
         "RSS: 获取%d源, 失败%d, 共%d条",

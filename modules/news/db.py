@@ -179,6 +179,35 @@ class NewsDB:
         finally:
             conn.close()
 
+    # ── 归档辅助 ────────────────────────────────────────────
+
+    def get_archive_candidates(self, cutoff: str, limit: int = 500) -> list[dict]:
+        """获取 created_at 早于 cutoff 的记录（归档候选），按 id 升序。"""
+        conn = self._get_conn()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM news WHERE created_at < ? ORDER BY id LIMIT ?",
+                (cutoff, limit),
+            ).fetchall()
+            return [self._row_to_dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def delete_by_ids(self, ids: list[int]) -> int:
+        """按 id 列表批量删除记录，返回删除条数。"""
+        if not ids:
+            return 0
+        conn = self._get_conn()
+        try:
+            placeholders = ",".join("?" * len(ids))
+            cur = conn.execute(
+                f"DELETE FROM news WHERE id IN ({placeholders})", ids
+            )
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
     # ── 查询辅助 ────────────────────────────────────────────
 
     def _build_query(self, sources=None, categories=None, keyword=None, date_from=None, date_to=None, count_only=False):
@@ -445,6 +474,7 @@ class NewsDB:
             "timestamp": row["timestamp"],
             "url": row["url"],
             "tags": json.loads(row["tags"]),
+            "content_hash": row["content_hash"] if "content_hash" in row.keys() else "",
             "category": category,
             "cluster_id": row["cluster_id"] if "cluster_id" in row.keys() else None,
             "created_at": row["created_at"],

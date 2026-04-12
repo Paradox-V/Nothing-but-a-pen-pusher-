@@ -1,12 +1,43 @@
-data/*.db
-data/chroma_db/
+# Python
 __pycache__/
 *.pyc
 *.pyo
-.env
 *.egg-info/
 dist/
 build/
-news.db
-chroma_db/
-docs/
+.venv/
+venv/
+
+# Data & database
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Environment & secrets
+.env
+config.yaml
+
+# Frontend build output
+frontend_dist/
+
+# IDE
+.vscode/
+.idea/
+
+# Claude / AI tools
+.claude/
+.superpowers/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Frontend dependencies
+frontend/node_modules/
+
+# Tool-generated docs
+docs/superpowers/
+
+# Logs
+*.log

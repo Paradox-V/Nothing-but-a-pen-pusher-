@@ -114,6 +114,7 @@ class NewsVectorEngine:
         self.db_path = db_path
         self.chroma_dir = chroma_dir
         self.model: SentenceTransformer | None = None
+        self._encode_fn = None  # 外部注入的编码函数（冷库复用时不加载模型）
         self.chroma_client: chromadb.PersistentClient | None = None
         self.collection: chromadb.Collection | None = None
         self._initialized = False
@@ -139,11 +140,36 @@ class NewsVectorEngine:
         # 预计算分类原型向量
         self._init_category_embeddings()
 
+    def initialize_with_client(self, chroma_client, encode_fn,
+                                collection_name: str = "news_embeddings") -> None:
+        """用外部 chroma_client + encode_fn 初始化（冷库复用，不重载模型）。
+
+        Args:
+            chroma_client: 已创建的 ChromaDB PersistentClient
+            encode_fn: 编码函数，签名 (texts: list[str]) -> list[list[float]]
+            collection_name: ChromaDB collection 名称
+        """
+        if self._initialized:
+            return
+
+        self.chroma_client = chroma_client
+        self._encode_fn = encode_fn
+        self.collection = self.chroma_client.get_or_create_collection(
+            name=collection_name,
+            metadata={"hnsw:space": "cosine"},
+        )
+        logger.info("ChromaDB（%s）就绪，已有 %d 条向量", collection_name, self.collection.count())
+        self._initialized = True
+
     # ── Embedding 计算 ──────────────────────────────────────
 
     def _encode(self, texts: list[str]) -> list[list[float]]:
-        """批量化文本编码。"""
+        """批量化文本编码。优先使用注入的 encode_fn，否则用模型。"""
         if not texts:
+            return []
+        if self._encode_fn:
+            return self._encode_fn(texts)
+        if not self.model:
             return []
         embeddings = self.model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
         return embeddings.tolist()
@@ -386,10 +412,13 @@ class NewsVectorEngine:
         可按 categories / sources 过滤（支持多值）。
         category metadata 存为逗号分隔字符串，用 $contains 匹配。
         """
-        if not self.model or not self._initialized:
+        if not self._initialized:
             return []
 
-        query_emb = self._encode([query])[0]
+        query_emb = self._encode([query])
+        if not query_emb or not query_emb[0]:
+            return []
+        query_emb = query_emb[0]
 
         where_filter = None
         conditions = []

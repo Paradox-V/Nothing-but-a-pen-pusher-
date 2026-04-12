@@ -373,3 +373,41 @@ class RSSDB:
             return cursor.rowcount
         finally:
             conn.close()
+
+    # ── 归档辅助 ────────────────────────────────────────────
+
+    def get_archive_candidates(self, cutoff: str, limit: int = 500) -> list[dict]:
+        """获取 crawl_time 早于 cutoff 的记录（归档候选），按 id 升序。"""
+        conn = self._get_conn()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM rss_items WHERE crawl_time < ? ORDER BY id LIMIT ?",
+                (cutoff, limit),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def delete_by_ids(self, ids: list[int]) -> int:
+        """按 id 列表批量删除记录，返回删除条数。"""
+        if not ids:
+            return 0
+        conn = self._get_conn()
+        try:
+            placeholders = ",".join("?" * len(ids))
+            cur = conn.execute(
+                f"DELETE FROM rss_items WHERE id IN ({placeholders})", ids
+            )
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
+    def get_all_feeds(self) -> list[dict]:
+        """获取所有 RSS 源信息（供冷库同步用）。"""
+        conn = self._get_conn()
+        try:
+            rows = conn.execute("SELECT * FROM rss_feeds").fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()

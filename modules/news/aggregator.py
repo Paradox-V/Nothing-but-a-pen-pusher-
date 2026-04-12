@@ -376,7 +376,7 @@ class AKSourceAggregator:
 
     # ── 抓取 + 入库 一体化 ─────────────────────────────────
 
-    def fetch_and_store(self, purge_days: int = 30) -> dict:
+    def fetch_and_store(self, purge_days: int = 30, skip_purge: bool = False) -> dict:
         """
         抓取 -> 去重 -> 入库（只存新增） -> 清理过期。
 
@@ -387,7 +387,10 @@ class AKSourceAggregator:
         items, sources_status = self._run_fetch_all()
         total_raw = sum(s["count"] for s in sources_status.values())
         new_added, new_row_ids = self.db.insert_many(items)
-        purged = self.db.purge_old(days=purge_days)
+        if not skip_purge:
+            purged = self.db.purge_old(days=purge_days)
+        else:
+            purged = 0
 
         logger.info(
             "抓取完成: 原始 %d 条, 新增 %d 条, 过期清理 %d 条",
