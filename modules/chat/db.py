@@ -41,28 +41,46 @@ class ChatDB:
             CREATE INDEX IF NOT EXISTS idx_chat_sessions_updated
                 ON chat_sessions(updated_at DESC);
         """)
+        # 增量迁移（参照 NewsDB 的 MIGRATIONS 模式）
+        migrations = [
+            "ALTER TABLE chat_sessions ADD COLUMN mode TEXT NOT NULL DEFAULT 'simple'",
+        ]
+        for sql in migrations:
+            try:
+                conn.execute(sql)
+            except sqlite3.OperationalError:
+                pass
+        conn.commit()
         conn.close()
 
     # ── 会话操作 ──────────────────────────────────────────────
 
-    def create_session(self, session_id: str, title: str = "") -> dict:
+    def create_session(self, session_id: str, title: str = "", mode: str = "simple") -> dict:
         conn = self._get_conn()
         conn.execute(
-            "INSERT INTO chat_sessions (id, title) VALUES (?, ?)",
-            (session_id, title),
+            "INSERT INTO chat_sessions (id, title, mode) VALUES (?, ?, ?)",
+            (session_id, title, mode),
         )
         conn.commit()
         conn.close()
-        return {"id": session_id, "title": title}
+        return {"id": session_id, "title": title, "mode": mode}
 
-    def get_sessions(self, limit: int = 50) -> list[dict]:
+    def get_sessions(self, mode: str = None, limit: int = 50) -> list[dict]:
         conn = self._get_conn()
-        rows = conn.execute(
-            "SELECT s.id, s.title, s.created_at, s.updated_at, "
-            "  (SELECT COUNT(*) FROM chat_messages WHERE session_id = s.id) AS msg_count "
-            "FROM chat_sessions s ORDER BY s.updated_at DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
+        if mode:
+            rows = conn.execute(
+                "SELECT s.id, s.title, s.mode, s.created_at, s.updated_at, "
+                "  (SELECT COUNT(*) FROM chat_messages WHERE session_id = s.id) AS msg_count "
+                "FROM chat_sessions s WHERE s.mode = ? ORDER BY s.updated_at DESC LIMIT ?",
+                (mode, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT s.id, s.title, s.mode, s.created_at, s.updated_at, "
+                "  (SELECT COUNT(*) FROM chat_messages WHERE session_id = s.id) AS msg_count "
+                "FROM chat_sessions s ORDER BY s.updated_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
         conn.close()
         return [dict(r) for r in rows]
 

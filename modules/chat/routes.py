@@ -14,7 +14,8 @@ _chat_service = ChatService()
 @chat_bp.route("/sessions", methods=["GET"])
 def get_sessions():
     """获取会话列表"""
-    sessions = _chat_service.db.get_sessions()
+    mode = request.args.get("mode")
+    sessions = _chat_service.db.get_sessions(mode=mode)
     return jsonify(sessions)
 
 
@@ -25,7 +26,8 @@ def create_session():
     data = request.json or {}
     session_id = str(uuid.uuid4())
     title = data.get("title", "")
-    session = _chat_service.db.create_session(session_id, title)
+    mode = data.get("mode", "simple")
+    session = _chat_service.db.create_session(session_id, title, mode=mode)
     return jsonify(session), 201
 
 
@@ -62,9 +64,16 @@ def chat(session_id):
     if not question:
         return jsonify({"error": "message is required"}), 400
 
+    # 根据 session mode 选择服务
+    if session.get("mode") == "agent":
+        from modules.agent.service import AgentService
+        stream_fn = AgentService().chat
+    else:
+        stream_fn = _chat_service.chat
+
     def generate():
         try:
-            for event in _chat_service.chat(session_id, question):
+            for event in stream_fn(session_id, question):
                 yield f"data: {event}\n\n"
         except GeneratorExit:
             pass

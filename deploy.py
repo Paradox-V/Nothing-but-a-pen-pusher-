@@ -39,6 +39,7 @@ FILES = [
     "ai/config.py",
     "ai/filter.py",
     "ai/analyzer.py",
+    "ai/langchain_config.py",
     # 数据模块
     "modules/__init__.py",
     "modules/news/__init__.py",
@@ -72,6 +73,16 @@ FILES = [
     "modules/chat/routes.py",
     "modules/chat/service.py",
     "modules/chat/db.py",
+    # Agent 模块
+    "modules/agent/__init__.py",
+    "modules/agent/tools.py",
+    "modules/agent/service.py",
+    # 监控模块
+    "modules/monitor/__init__.py",
+    "modules/monitor/db.py",
+    "modules/monitor/service.py",
+    "modules/monitor/push.py",
+    "modules/monitor/routes.py",
     # 归档模块
     "modules/archive/__init__.py",
     "modules/archive/manager.py",

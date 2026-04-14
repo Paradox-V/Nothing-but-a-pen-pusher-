@@ -14,6 +14,8 @@ from modules.topic.routes import topic_bp
 from modules.creator.routes import creator_bp
 from modules.chat.routes import chat_bp
 from modules.archive.routes import archive_bp
+from modules.monitor.routes import monitor_bp
+from modules.wcf.routes import wcf_bp
 
 # React 构建产物目录
 _REACT_DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontend_dist")
@@ -40,6 +42,8 @@ app.register_blueprint(topic_bp)
 app.register_blueprint(creator_bp)
 app.register_blueprint(chat_bp)
 app.register_blueprint(archive_bp)
+app.register_blueprint(monitor_bp)
+app.register_blueprint(wcf_bp)
 
 
 @app.route("/")
