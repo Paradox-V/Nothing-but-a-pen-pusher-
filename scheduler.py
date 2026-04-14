@@ -362,6 +362,14 @@ def main():
     heartbeat_path = "data/.scheduler_heartbeat"
     os.makedirs("data", exist_ok=True)
 
+    # Monitor 监控任务配置
+    monitor_cfg = _get_monitor_config()
+    monitor_timer = 0
+
+    # WCF 事件轮询配置
+    wcf_cfg = _get_wcf_config()
+    wcf_timer = 0
+
     while True:
         time.sleep(1)
 
@@ -396,6 +404,65 @@ def main():
                             rss_db, rss_fetcher, purge_days,
                             hotlist_vector=hotlist_vector, rss_vector=rss_vector,
                             archive_manager=archive_manager)
+
+        # Monitor 监控任务检查
+        if monitor_cfg["enabled"]:
+            monitor_timer += 1
+            if monitor_timer >= monitor_cfg["check_interval"]:
+                monitor_timer = 0
+                _check_monitor_tasks()
+
+        # WCF 事件轮询
+        if wcf_cfg["enabled"]:
+            wcf_timer += 1
+            if wcf_timer >= wcf_cfg["poll_interval"]:
+                wcf_timer = 0
+                _poll_wcf_events()
+
+
+def _get_monitor_config():
+    """读取 monitor 配置。"""
+    config = load_config()
+    monitor_cfg = config.get("monitor", {})
+    return {
+        "enabled": monitor_cfg.get("enabled", False),
+        "check_interval": monitor_cfg.get("check_interval", 60),
+        "schedules": monitor_cfg.get("schedules", {
+            "daily_morning": "08:00",
+            "daily_evening": "20:00",
+        }),
+    }
+
+
+def _check_monitor_tasks():
+    """检查到期任务，异步执行。防重入由 MonitorService 内部锁保证。"""
+    try:
+        from modules.monitor.service import get_monitor_service
+        svc = get_monitor_service()
+        for task in svc.get_due_tasks():
+            t = threading.Thread(target=svc.run_task, args=(task["id"],), daemon=True)
+            t.start()
+    except Exception as e:
+        logger.error("Monitor check failed: %s", e)
+
+
+def _get_wcf_config():
+    """读取 WCF 配置。"""
+    config = load_config()
+    wcf_cfg = config.get("wcf", {})
+    return {
+        "enabled": wcf_cfg.get("enabled", False),
+        "poll_interval": wcf_cfg.get("poll_interval", 3),
+    }
+
+
+def _poll_wcf_events():
+    """轮询 wcfLink 事件并消费。"""
+    try:
+        from modules.wcf.service import consume_events
+        consume_events()
+    except Exception as e:
+        logger.error("WCF event poll failed: %s", e)
 
 
 def _run_module(module, news_db, aggregator, vector_engine,

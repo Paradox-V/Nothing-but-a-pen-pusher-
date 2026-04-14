@@ -10,6 +10,7 @@ const navLinks = [
   { label: "RSS", tab: "rss" },
   { label: "创作", tab: "creator" },
   { label: "问答", tab: "chat" },
+  { label: "监控", tab: "monitor" },
 ]
 
 interface NavbarProps {

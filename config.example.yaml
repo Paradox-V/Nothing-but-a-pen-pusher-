@@ -40,3 +40,24 @@ vector:
 rsshub:
   base_url: "http://127.0.0.1:1200"
   # sites 配置与 config.yaml 相同，此处省略
+
+agent:
+  enabled: true
+  max_iterations: 8
+
+wcf:
+  enabled: false
+  url: "http://127.0.0.1:17890"    # wcfLink HTTP 服务地址
+  poll_interval: 3                   # 事件轮询间隔（秒）
+  event_batch_size: 100              # 单次拉取事件数量上限
+  commands:
+    help: ["帮助", "菜单"]
+    list: ["监控列表", "列表"]
+    report: ["报告", "日报", "监控"]
+
+monitor:
+  enabled: true
+  check_interval: 60           # 检查到期任务的间隔（秒）
+  schedules:
+    daily_morning: "08:00"
+    daily_evening: "20:00"

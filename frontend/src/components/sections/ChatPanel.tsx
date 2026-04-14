@@ -1,15 +1,17 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { MessageCircle, Plus, Send, Trash2, ExternalLink } from "lucide-react"
+import { MessageCircle, Plus, Send, Trash2, ExternalLink, Bot, MessageSquare } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Empty } from "@/components/shared/Empty"
 import { useTheme } from "@/hooks/use-theme"
 import { apiFetch } from "@/hooks/use-api"
 import { marked } from "marked"
 import DOMPurify from "dompurify"
+import ToolCallCard from "@/components/shared/ToolCallCard"
 
-interface Session { id: string; title: string; msg_count: number }
+interface Session { id: string; title: string; msg_count: number; mode?: string }
 interface Message { role: "user" | "assistant"; content: string; sources?: string }
+interface ToolEvent { tool: string; args: Record<string, unknown>; summary?: string }
 
 function renderMarkdown(text: string): string {
   return DOMPurify.sanitize(marked.parse(text, { breaks: true }) as string)
@@ -37,6 +39,8 @@ export function ChatPanel() {
   const [input, setInput] = useState("")
   const [streaming, setStreaming] = useState(false)
   const [streamContent, setStreamContent] = useState("")
+  const [toolEvents, setToolEvents] = useState<ToolEvent[]>([])
+  const [agentMode, setAgentMode] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const { theme } = useTheme()
   const v = theme === "vintage"
@@ -46,7 +50,6 @@ export function ChatPanel() {
   const loadMessages = useCallback(async (sessionId: string) => {
     setActiveSession(sessionId)
     try {
-      // 后端直接返回消息数组，不是 { messages: [...] }
       const data = await (await apiFetch(`/chat/sessions/${sessionId}/messages`)).json()
       setMessages(Array.isArray(data) ? data : [])
     } catch { setMessages([]) }
@@ -56,7 +59,7 @@ export function ChatPanel() {
     try {
       const res = await apiFetch("/chat/sessions", {
         method: "POST",
-        body: "{}",
+        body: JSON.stringify({ mode: agentMode ? "agent" : "simple" }),
       })
       if (!res.ok) {
         if (res.status === 401 || res.status === 503) {
@@ -67,7 +70,7 @@ export function ChatPanel() {
         return
       }
       const data = await res.json()
-      const s = { id: data.id, title: data.title || "新对话", msg_count: 0 }
+      const s = { id: data.id, title: data.title || "新对话", msg_count: 0, mode: data.mode }
       setSessions((prev) => [s, ...prev]); setActiveSession(s.id); setMessages([])
     } catch (e) { console.error("create session error:", e) }
   }
@@ -82,9 +85,8 @@ export function ChatPanel() {
     if (!activeSession || !input.trim() || streaming) return
     const userMsg = input.trim(); setInput("")
     setMessages((prev) => [...prev, { role: "user", content: userMsg }])
-    setStreaming(true); setStreamContent("")
+    setStreaming(true); setStreamContent(""); setToolEvents([])
 
-    // 用局部变量收集 sources，避免闭包问题
     let collectedSources: { title: string; url: string }[] = []
 
     try {
@@ -115,18 +117,32 @@ export function ChatPanel() {
           if (raw === "[DONE]") break
           try {
             const event = JSON.parse(raw)
-            if (event.type === "content") { fullContent += event.text; setStreamContent(fullContent) }
-            else if (event.type === "sources") {
+            if (event.type === "content") {
+              fullContent += event.text; setStreamContent(fullContent)
+            } else if (event.type === "sources") {
               const parsed = JSON.parse(event.data)
               collectedSources = parsed
+            } else if (event.type === "tool_call") {
+              setToolEvents((prev) => [...prev, { tool: event.tool, args: event.args || {} }])
+            } else if (event.type === "tool_result") {
+              setToolEvents((prev) => {
+                const updated = [...prev]
+                // Find the last matching tool_call and attach summary
+                for (let i = updated.length - 1; i >= 0; i--) {
+                  if (updated[i].tool === event.tool && !updated[i].summary) {
+                    updated[i] = { ...updated[i], summary: event.summary }
+                    break
+                  }
+                }
+                return updated
+              })
             }
           } catch { /* */ }
         }
       }
-      // 用局部变量 collectedSources 而非闭包里的 streamSources
       setMessages((prev) => [...prev, { role: "assistant", content: fullContent, sources: collectedSources.length > 0 ? JSON.stringify(collectedSources) : undefined }])
     } catch { /* */ }
-    setStreaming(false); setStreamContent("")
+    setStreaming(false); setStreamContent(""); setToolEvents([])
   }
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }) }, [messages, streamContent])
@@ -135,6 +151,26 @@ export function ChatPanel() {
     <div className="max-w-7xl mx-auto px-6 py-8 flex gap-4 h-[calc(100vh-8rem)]">
       {/* Sidebar */}
       <div className="w-64 shrink-0 flex flex-col gap-2">
+        {/* Mode Toggle */}
+        <div className={cn("flex rounded-xl border p-0.5", v ? "border-[#4F7942]/20" : "border-border")}>
+          <button
+            onClick={() => setAgentMode(false)}
+            className={cn("flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-[12px] font-medium transition-all",
+              !agentMode
+                ? v ? "bg-[#4F7942] text-white" : "bg-accent text-accent-foreground"
+                : v ? "text-[#2C2E31]/50 hover:text-[#2C2E31]/70" : "text-foreground/40 hover:text-foreground/60"
+            )}
+          ><MessageSquare size={13} /> 简单问答</button>
+          <button
+            onClick={() => setAgentMode(true)}
+            className={cn("flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-[12px] font-medium transition-all",
+              agentMode
+                ? v ? "bg-[#4F7942] text-white" : "bg-accent text-accent-foreground"
+                : v ? "text-[#2C2E31]/50 hover:text-[#2C2E31]/70" : "text-foreground/40 hover:text-foreground/60"
+            )}
+          ><Bot size={13} /> Agent 模式</button>
+        </div>
+
         <button onClick={createSession}
           className={cn("flex items-center justify-center gap-2 p-3 rounded-xl border text-[13px] transition-all",
             v ? "bg-[#4F7942]/10 border-[#4F7942]/20 text-[#4F7942] hover:bg-[#4F7942]/20" : "bg-muted border-border text-foreground/50 hover:text-foreground/70 hover:bg-muted"
@@ -150,6 +186,11 @@ export function ChatPanel() {
               )}
               onClick={() => loadMessages(session.id)}
             >
+              {session.mode === "agent" && (
+                <span className={cn("shrink-0 px-1 py-0.5 rounded text-[9px] font-bold",
+                  v ? "bg-[#4F7942]/20 text-[#4F7942]" : "bg-accent/10 text-accent"
+                )}>Agent</span>
+              )}
               <span className="flex-1 text-[13px] truncate">{session.title}</span>
               <button onClick={(e) => { e.stopPropagation(); deleteSession(session.id) }}
                 className="opacity-0 group-hover:opacity-100 p-1 text-foreground/20 hover:text-destructive transition-all"
@@ -162,7 +203,7 @@ export function ChatPanel() {
       {/* Chat area */}
       <div className="flex-1 flex flex-col rounded-2xl bg-card border border-border overflow-hidden">
         {!activeSession ? (
-          <Empty icon={<MessageCircle size={40} />} title="开始对话" description="创建一个新对话或选择已有会话" />
+          <Empty icon={<MessageCircle size={40} />} title="开始对话" description={agentMode ? "Agent 模式：AI 会自动选择工具检索信息" : "创建一个新对话或选择已有会话"} />
         ) : (
           <>
             <div className="flex-1 overflow-auto p-6 space-y-4">
@@ -189,6 +230,15 @@ export function ChatPanel() {
                 ))}
               </AnimatePresence>
 
+              {/* Agent tool events */}
+              {streaming && toolEvents.length > 0 && (
+                <div className="space-y-1">
+                  {toolEvents.map((evt, i) => (
+                    <ToolCallCard key={i} tool={evt.tool} args={evt.args} summary={evt.summary} />
+                  ))}
+                </div>
+              )}
+
               {streaming && streamContent && (
                 <div className="flex justify-start">
                   <div className="max-w-[70%] px-4 py-3 rounded-2xl rounded-bl-md bg-muted text-foreground/70 text-[14px] leading-relaxed">
@@ -197,7 +247,7 @@ export function ChatPanel() {
                   </div>
                 </div>
               )}
-              {streaming && !streamContent && (
+              {streaming && !streamContent && toolEvents.length === 0 && (
                 <div className="flex justify-start">
                   <div className="px-4 py-3 rounded-2xl rounded-bl-md bg-muted">
                     <div className="flex gap-1">
@@ -213,7 +263,7 @@ export function ChatPanel() {
 
             <div className="p-4 border-t border-border">
               <div className="flex items-center gap-2">
-                <input placeholder="输入消息..." value={input} onChange={(e) => setInput(e.target.value)}
+                <input placeholder={agentMode ? "Agent 模式：AI 会自动选择工具..." : "输入消息..."} value={input} onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage() } }}
                   disabled={streaming}
                   className={cn(

@@ -10,6 +10,7 @@ import { HotlistPanel } from "@/components/sections/HotlistPanel"
 import { RssPanel } from "@/components/sections/RssPanel"
 import { CreatorPanel } from "@/components/sections/CreatorPanel"
 import { ChatPanel } from "@/components/sections/ChatPanel"
+import { MonitorPanel } from "@/components/sections/MonitorPanel"
 
 interface AppStatus {
   news_count?: number
@@ -24,6 +25,7 @@ const panels: Record<string, React.FC> = {
   rss: RssPanel,
   creator: CreatorPanel,
   chat: ChatPanel,
+  monitor: MonitorPanel,
 }
 
 function AppInner() {

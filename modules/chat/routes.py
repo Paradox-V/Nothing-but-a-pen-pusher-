@@ -10,11 +10,23 @@ from utils.auth import require_auth
 chat_bp = Blueprint("chat", __name__, url_prefix="/api/chat")
 _chat_service = ChatService()
 
+# Agent 服务惰性初始化单例（避免 import 时加载 langchain）
+_agent_service = None
+
+
+def _get_agent_service():
+    global _agent_service
+    if _agent_service is None:
+        from modules.agent.service import AgentService
+        _agent_service = AgentService()
+    return _agent_service
+
 
 @chat_bp.route("/sessions", methods=["GET"])
 def get_sessions():
     """获取会话列表"""
-    sessions = _chat_service.db.get_sessions()
+    mode = request.args.get("mode")
+    sessions = _chat_service.db.get_sessions(mode=mode)
     return jsonify(sessions)
 
 
@@ -25,7 +37,8 @@ def create_session():
     data = request.json or {}
     session_id = str(uuid.uuid4())
     title = data.get("title", "")
-    session = _chat_service.db.create_session(session_id, title)
+    mode = data.get("mode", "simple")
+    session = _chat_service.db.create_session(session_id, title, mode=mode)
     return jsonify(session), 201
 
 
@@ -62,9 +75,15 @@ def chat(session_id):
     if not question:
         return jsonify({"error": "message is required"}), 400
 
+    # 根据 session mode 选择服务
+    if session.get("mode") == "agent":
+        stream_fn = _get_agent_service().chat
+    else:
+        stream_fn = _chat_service.chat
+
     def generate():
         try:
-            for event in _chat_service.chat(session_id, question):
+            for event in stream_fn(session_id, question):
                 yield f"data: {event}\n\n"
         except GeneratorExit:
             pass
