@@ -18,7 +18,7 @@ def get_chat_model(temperature=None, max_tokens=None):
         model=model_name,
         api_key=cfg["API_KEY"],
         base_url=cfg["API_BASE"],
-        temperature=temperature or cfg.get("TEMPERATURE", 0.7),
-        max_tokens=max_tokens or cfg.get("MAX_TOKENS", 2000),
+        temperature=temperature if temperature is not None else cfg.get("TEMPERATURE", 0.7),
+        max_tokens=max_tokens if max_tokens is not None else cfg.get("MAX_TOKENS", 2000),
         timeout=cfg.get("TIMEOUT", 120),
     )

@@ -10,6 +10,17 @@ from utils.auth import require_auth
 chat_bp = Blueprint("chat", __name__, url_prefix="/api/chat")
 _chat_service = ChatService()
 
+# Agent 服务惰性初始化单例（避免 import 时加载 langchain）
+_agent_service = None
+
+
+def _get_agent_service():
+    global _agent_service
+    if _agent_service is None:
+        from modules.agent.service import AgentService
+        _agent_service = AgentService()
+    return _agent_service
+
 
 @chat_bp.route("/sessions", methods=["GET"])
 def get_sessions():
@@ -66,8 +77,7 @@ def chat(session_id):
 
     # 根据 session mode 选择服务
     if session.get("mode") == "agent":
-        from modules.agent.service import AgentService
-        stream_fn = AgentService().chat
+        stream_fn = _get_agent_service().chat
     else:
         stream_fn = _chat_service.chat
 

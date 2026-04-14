@@ -16,13 +16,16 @@ logger = logging.getLogger(__name__)
 _running_lock = threading.Lock()
 _running_tasks: set[str] = set()
 _monitor_service_instance = None
+_singleton_lock = threading.Lock()
 
 
 def get_monitor_service() -> "MonitorService":
     """模块级单例，确保 scheduler 和 routes 共享同一实例和锁。"""
     global _monitor_service_instance
     if _monitor_service_instance is None:
-        _monitor_service_instance = MonitorService()
+        with _singleton_lock:
+            if _monitor_service_instance is None:
+                _monitor_service_instance = MonitorService()
     return _monitor_service_instance
 
 

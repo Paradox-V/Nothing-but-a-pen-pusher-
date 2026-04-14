@@ -114,11 +114,7 @@ class AgentService:
                     events.append(event)
                 return events
 
-            loop = asyncio.new_event_loop()
-            try:
-                agent_events = loop.run_until_complete(_run())
-            finally:
-                loop.close()
+            agent_events = asyncio.run(_run())
 
             for event in agent_events:
                 event_type = event.get("event", "")

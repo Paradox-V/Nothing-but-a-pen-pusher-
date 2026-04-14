@@ -83,6 +83,12 @@ FILES = [
     "modules/monitor/service.py",
     "modules/monitor/push.py",
     "modules/monitor/routes.py",
+    # WCF 微信模块
+    "modules/wcf/__init__.py",
+    "modules/wcf/client.py",
+    "modules/wcf/db.py",
+    "modules/wcf/service.py",
+    "modules/wcf/routes.py",
     # 归档模块
     "modules/archive/__init__.py",
     "modules/archive/manager.py",
