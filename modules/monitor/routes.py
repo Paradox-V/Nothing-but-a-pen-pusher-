@@ -79,9 +79,11 @@ def delete_task(task_id):
 @monitor_bp.route("/tasks/<task_id>/run", methods=["POST"])
 @require_auth
 def run_task(task_id):
-    """手动触发监控任务执行"""
-    result = _monitor_svc.run_task(task_id)
-    return jsonify(result)
+    """手动触发监控任务执行（后台线程，立即返回）"""
+    import threading
+    t = threading.Thread(target=_monitor_svc.run_task, args=(task_id,), daemon=True)
+    t.start()
+    return jsonify({"status": "started"})
 
 
 @monitor_bp.route("/tasks/<task_id>/logs", methods=["GET"])
