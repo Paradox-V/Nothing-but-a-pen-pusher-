@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Unlink, Plus, Play, Trash2, Clock } from "lucide-react"
+import { Unlink, Plus, Play, Trash2, Clock, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { WcfBinding, MonitorTask, PushLog } from "./types"
 import { SCHEDULE_OPTIONS } from "./types"
@@ -17,12 +17,13 @@ interface ContactCardProps {
   onToggleExpandTask: (taskId: string) => void
   onRunTask: (taskId: string) => void
   onDeleteTask: (taskId: string) => void
+  runningTaskId: string | null
 }
 
 export function ContactCard({
   binding, tasks, expandedTask, logs, v,
   onCreateTask, onUnbindTask, onToggleEnabled,
-  onToggleExpandTask, onRunTask, onDeleteTask,
+  onToggleExpandTask, onRunTask, onDeleteTask, runningTaskId,
 }: ContactCardProps) {
   const [showForm, setShowForm] = useState(false)
 
@@ -82,10 +83,10 @@ export function ContactCard({
                         {task.last_run_at && <span>上次: {task.last_run_at}</span>}
                       </div>
                     </div>
-                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex items-center gap-1">
                       <button onClick={(e) => { e.stopPropagation(); onRunTask(task.id) }}
                         className="p-1 rounded hover:bg-muted text-foreground/30 hover:text-foreground/60" title="立即执行"
-                      ><Play size={12} /></button>
+                      >{runningTaskId === task.id ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}</button>
                       <button onClick={(e) => { e.stopPropagation(); onDeleteTask(task.id) }}
                         className="p-1 rounded hover:bg-muted text-foreground/30 hover:text-destructive" title="删除"
                       ><Trash2 size={12} /></button>

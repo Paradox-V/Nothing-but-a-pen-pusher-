@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { cn } from "@/lib/utils"
 import { useTheme } from "@/hooks/use-theme"
 import { apiFetch } from "@/hooks/use-api"
@@ -63,10 +63,74 @@ export function MonitorPanel() {
     } catch { /* */ }
   }, [])
 
+  const [runningTaskId, setRunningTaskId] = useState<string | null>(null)
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const fallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // 组件卸载时清理轮询
+  useEffect(() => {
+    return () => {
+      if (pollingRef.current) clearInterval(pollingRef.current)
+      if (fallbackRef.current) clearTimeout(fallbackRef.current)
+    }
+  }, [])
+
   const runTask = async (id: string) => {
-    await apiFetch(`/monitor/tasks/${id}/run`, { method: "POST" })
-    loadTasks()
-    if (expandedTask === id) loadLogs(id)
+    if (runningTaskId === id) return // 防重复点击
+    setRunningTaskId(id)
+    try {
+      const res = await apiFetch(`/monitor/tasks/${id}/run`, { method: "POST" })
+      if (res.status === 409) {
+        const data = await res.json().catch(() => ({}))
+        alert(data.reason || "任务正在执行中")
+        setRunningTaskId(null)
+        return
+      }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        alert(`执行失败: ${data.error || res.status}`)
+        setRunningTaskId(null)
+        return
+      }
+
+      // 清理已有的轮询
+      if (pollingRef.current) clearInterval(pollingRef.current)
+      if (fallbackRef.current) clearTimeout(fallbackRef.current)
+
+      // 轮询等待任务完成（每 5 秒检查 task 的 last_run_at）
+      pollingRef.current = setInterval(async () => {
+        try {
+          const taskRes = await apiFetch(`/monitor/tasks/${id}`)
+          if (!taskRes.ok) return
+          const taskData = await taskRes.json()
+          const lastRun = new Date(taskData.last_run_at).getTime()
+          // last_run_at 在 30 秒内 → 任务刚完成
+          if (Date.now() - lastRun < 30000) {
+            loadTasks()
+            if (expandedTask === id) loadLogs(id)
+            clearInterval(pollingRef.current!)
+            pollingRef.current = null
+            if (fallbackRef.current) {
+              clearTimeout(fallbackRef.current)
+              fallbackRef.current = null
+            }
+            setRunningTaskId(null)
+          }
+        } catch { /* 轮询忽略网络错误 */ }
+      }, 5000)
+
+      // 兜底：60 秒后强制结束轮询
+      fallbackRef.current = setTimeout(() => {
+        if (pollingRef.current) clearInterval(pollingRef.current)
+        pollingRef.current = null
+        fallbackRef.current = null
+        setRunningTaskId(null)
+        loadTasks()
+      }, 60000)
+    } catch (err) {
+      alert(`请求失败: ${err}`)
+      setRunningTaskId(null)
+    }
   }
 
   const deleteTask = async (id: string) => {
@@ -107,6 +171,7 @@ export function MonitorPanel() {
         onRunTask={runTask}
         onDeleteTask={deleteTask}
         onToggleExpandTask={toggleExpand}
+        runningTaskId={runningTaskId}
       />
 
       <NonWcfTaskSection

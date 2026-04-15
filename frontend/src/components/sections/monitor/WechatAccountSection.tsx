@@ -19,12 +19,13 @@ interface WechatAccountSectionProps {
   onRunTask: (taskId: string) => void
   onDeleteTask: (taskId: string) => void
   onToggleExpandTask: (taskId: string | null) => void
+  runningTaskId: string | null
 }
 
 export function WechatAccountSection({
   wcfAccounts, wcfBindings, tasks, expandedTask, logs, v,
   onLoadAccounts, onLoadBindings, onLoadTasks,
-  onRunTask, onDeleteTask, onToggleExpandTask,
+  onRunTask, onDeleteTask, onToggleExpandTask, runningTaskId,
 }: WechatAccountSectionProps) {
   const [showQRDialog, setShowQRDialog] = useState(false)
   const [qrImageUrl, setQrImageUrl] = useState<string | null>(null)
@@ -251,6 +252,7 @@ export function WechatAccountSection({
                     onToggleExpandTask={onToggleExpandTask}
                     onRunTask={onRunTask}
                     onDeleteTask={onDeleteTask}
+                    runningTaskId={runningTaskId}
                   />
                 ))}
               </div>

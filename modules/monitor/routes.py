@@ -80,6 +80,8 @@ def delete_task(task_id):
 @require_auth
 def run_task(task_id):
     """手动触发监控任务执行（后台线程，立即返回）"""
+    if _monitor_svc.is_task_running(task_id):
+        return jsonify({"status": "skipped", "reason": "任务正在执行中"}), 409
     import threading
     t = threading.Thread(target=_monitor_svc.run_task, args=(task_id,), daemon=True)
     t.start()

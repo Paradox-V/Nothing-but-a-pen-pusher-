@@ -86,6 +86,11 @@ class MonitorService:
                 pass
         return ok
 
+    def is_task_running(self, task_id: str) -> bool:
+        """检查任务是否正在执行。"""
+        with _running_lock:
+            return task_id in _running_tasks
+
     def get_push_logs(self, task_id: str, limit: int = 20) -> list[dict]:
         return self.db.get_push_logs(task_id, limit)
 
@@ -145,16 +150,47 @@ class MonitorService:
 
         keywords = json.loads(task["keywords"])
         all_results = []
-        for kw in keywords:
-            results = scheduler_post(
-                "/chat_search",
-                json_data={"query": kw, "top_k": 5},
-                timeout=15,
-            )
-            if results and isinstance(results, list):
-                all_results.extend(results)
 
-        return self._generate_report(task["name"], keywords, all_results)
+        # 1) 合并关键词为一次宽泛搜索
+        merged_query = " ".join(keywords)
+        merged = scheduler_post(
+            "/chat_search",
+            json_data={"query": merged_query, "top_k": 10},
+            timeout=15,
+        )
+        if merged and isinstance(merged, list):
+            all_results.extend(merged)
+
+        # 2) 并行搜索各个关键词，补充长尾结果
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from functools import partial
+        with ThreadPoolExecutor(max_workers=min(len(keywords), 4)) as pool:
+            futures = {
+                pool.submit(
+                    partial(scheduler_post, "/chat_search",
+                            json_data={"query": kw, "top_k": 3},
+                            timeout=15),
+                ): kw for kw in keywords
+            }
+            for future in as_completed(futures):
+                kw = futures[future]
+                try:
+                    results = future.result()
+                    if results and isinstance(results, list):
+                        all_results.extend(results)
+                except Exception as exc:
+                    logger.warning("并行搜索关键词 '%s' 失败: %s", kw, exc)
+
+        # 按标题去重
+        seen = set()
+        deduped = []
+        for r in all_results:
+            key = r.get("title", "") or r.get("content", "")[:50]
+            if key not in seen:
+                seen.add(key)
+                deduped.append(r)
+
+        return self._generate_report(task["name"], keywords, deduped)
 
     def deliver_report(self, report: str, push_config: list,
                        task_id: str = "") -> list[dict]:
@@ -306,6 +342,10 @@ class MonitorService:
 
         # 调用 LLM
         try:
+            from ai.config import get_ai_config
+            ai_cfg = get_ai_config()
+            if not ai_cfg.get("API_KEY"):
+                raise RuntimeError("AI API Key 未配置，跳过 LLM")
             from ai.langchain_config import get_chat_model
             llm = get_chat_model(temperature=0.5, max_tokens=1000)
             prompt = REPORT_PROMPT.format(context=context)
