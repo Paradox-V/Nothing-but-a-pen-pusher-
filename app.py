@@ -75,6 +75,16 @@ def api_status():
     try:
         news_db = NewsDB()
         count = news_db.get_count()
+        # 加上冷库归档数据
+        try:
+            import sqlite3 as _sq
+            _arch_path = os.path.join(os.path.dirname(news_db.db_path), "archive", "news_archive.db")
+            if os.path.exists(_arch_path):
+                _arch_conn = _sq.connect(_arch_path)
+                count += _arch_conn.execute("SELECT COUNT(*) FROM news").fetchone()[0]
+                _arch_conn.close()
+        except Exception:
+            pass
         status["news_count"] = count
         status["news"] = {"count": count, "available": True}
     except (sqlite3.DatabaseError, sqlite3.OperationalError, OSError):
