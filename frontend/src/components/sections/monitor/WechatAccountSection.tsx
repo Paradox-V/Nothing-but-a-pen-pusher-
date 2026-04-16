@@ -158,22 +158,17 @@ export function WechatAccountSection({
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {wcfConnected ? (
-              <div className="flex items-center gap-2">
-                {wcfAccounts.map(a => (
-                  <span key={a.account_id} className="px-2 py-1 rounded-lg text-xs bg-green-500/10 text-green-500">
-                    {a.account_id.split("@")[0]}
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <button onClick={() => { setShowQRDialog(true); startLogin() }}
-                className={cn("px-3 py-1.5 rounded-lg text-xs font-medium",
-                  v ? "bg-[#4F7942] text-white hover:bg-[#3B5E32]" : "bg-accent text-accent-foreground hover:bg-accent/90"
-                )}>
-                连接微信
-              </button>
-            )}
+            {wcfAccounts.map(a => (
+              <span key={a.account_id} className="px-2 py-1 rounded-lg text-xs bg-green-500/10 text-green-500">
+                {a.account_id.split("@")[0]}
+              </span>
+            ))}
+            <button onClick={() => { setShowQRDialog(true); startLogin() }}
+              className={cn("px-3 py-1.5 rounded-lg text-xs font-medium",
+                v ? "bg-[#4F7942] text-white hover:bg-[#3B5E32]" : "bg-accent text-accent-foreground hover:bg-accent/90"
+              )}>
+              + 添加微信
+            </button>
           </div>
         </div>
       </div>
