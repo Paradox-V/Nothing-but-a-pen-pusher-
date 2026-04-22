@@ -45,6 +45,7 @@ class ChatDB:
             # 增量迁移（参照 NewsDB 的 MIGRATIONS 模式）
             migrations = [
                 "ALTER TABLE chat_sessions ADD COLUMN mode TEXT NOT NULL DEFAULT 'simple'",
+                "ALTER TABLE chat_sessions ADD COLUMN owner_id TEXT",
             ]
             for sql in migrations:
                 try:

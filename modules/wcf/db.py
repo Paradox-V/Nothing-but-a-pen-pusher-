@@ -57,6 +57,16 @@ class WCFDB:
         conn = self._get_conn()
         try:
             conn.executescript(_CREATE_TABLES)
+            # 增量迁移
+            migrations = [
+                "ALTER TABLE wcf_bindings ADD COLUMN owner_id TEXT",
+            ]
+            for sql in migrations:
+                try:
+                    conn.execute(sql)
+                except Exception:
+                    pass
+            conn.commit()
         finally:
             conn.close()
 
