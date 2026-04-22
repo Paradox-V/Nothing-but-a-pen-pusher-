@@ -6,7 +6,7 @@ import { Empty } from "@/components/shared/Empty"
 import { useTheme } from "@/hooks/use-theme"
 import { apiFetch } from "@/hooks/use-api"
 import { marked } from "marked"
-import DOMPurify from "dompurify"
+import * as DOMPurify from "dompurify"
 import ToolCallCard from "@/components/shared/ToolCallCard"
 
 interface Session { id: string; title: string; msg_count: number; mode?: string }

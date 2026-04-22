@@ -272,7 +272,10 @@ def main():
 
     # --- 新闻模块 ---
     news_db = NewsDB()
-    aggregator = AKSourceAggregator(db=news_db)
+    aktools_url = config.get("aktools", {}).get("base_url")
+    aggregator = AKSourceAggregator(
+        base_url=aktools_url, db=news_db
+    )
     vector_engine = None
     try:
         vector_engine = NewsVectorEngine()

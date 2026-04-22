@@ -9,6 +9,7 @@
 import asyncio
 import hashlib
 import logging
+import os
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
@@ -22,7 +23,9 @@ logger = logging.getLogger(__name__)
 class AKSourceAggregator:
     """AKTools 信源统合聚合器"""
 
-    BASE_URL = "http://49.232.239.68:8080/api/public"
+    BASE_URL = os.environ.get(
+        "AKTOOLS_BASE_URL", "http://127.0.0.1:8080/api/public"
+    )
 
     SOURCE_REGISTRY: dict[str, dict[str, Any]] = {
         "stock_info_global_sina": {

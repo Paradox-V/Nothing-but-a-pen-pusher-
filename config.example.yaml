@@ -4,6 +4,9 @@ scheduler:
   rss_interval: 1800
   purge_days: 7
 
+aktools:
+  base_url: "http://127.0.0.1:8080/api/public"   # AKTools API 地址，也可通过环境变量 AKTOOLS_BASE_URL 配置
+
 archive:
   enabled: false              # 启用热/冷归档（生产环境设为 true）
   archive_days: 7             # 超过 N 天的数据迁移到冷库
