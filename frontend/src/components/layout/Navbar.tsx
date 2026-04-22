@@ -34,10 +34,15 @@ export function Navbar({ activeTab, onTabChange }: NavbarProps) {
   const isVintage = theme === "vintage"
 
   const handleAdminClick = () => {
+    const existing = localStorage.getItem("_admin_token")
+    if (existing) {
+      onTabChange("admin")
+      return
+    }
     const token = prompt("设置管理密钥")
-    if (token !== null) {
-      localStorage.setItem("_admin_token", token)
-      if (token) onTabChange("admin")
+    if (token !== null && token.trim()) {
+      localStorage.setItem("_admin_token", token.trim())
+      onTabChange("admin")
     }
   }
 

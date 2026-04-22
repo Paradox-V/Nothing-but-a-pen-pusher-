@@ -227,6 +227,7 @@ def _handle_agent_message(account_id: str, user_id: str, text: str, wcf_cfg: dic
 
         full_text = ""
         import threading
+        import contextvars
 
         result_container = []
         error_container = []
@@ -243,7 +244,9 @@ def _handle_agent_message(account_id: str, user_id: str, text: str, wcf_cfg: dic
             except Exception as exc:
                 error_container.append(str(exc))
 
-        t = threading.Thread(target=_run_agent, daemon=True)
+        # 复制当前线程的 ContextVar 上下文到新线程
+        ctx = contextvars.copy_context()
+        t = threading.Thread(target=ctx.run, args=(_run_agent,), daemon=True)
         t.start()
         t.join(timeout=agent_timeout)
 

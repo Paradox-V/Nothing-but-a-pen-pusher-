@@ -189,9 +189,9 @@ class WechatMPConverter:
         except Exception:
             pass
 
-        # Fallback: 用 ElementTree 解析（处理正规 XML）
+        # Fallback: 用 defusedxml 解析（防止 XXE 攻击）
         try:
-            import xml.etree.ElementTree as ET
+            import defusedxml.ElementTree as ET
             root = ET.fromstring(xml_text)
             # RSS 2.0: channel/title
             ns = {"atom": "http://www.w3.org/2005/Atom"}

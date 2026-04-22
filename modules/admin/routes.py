@@ -26,6 +26,10 @@ logger = logging.getLogger(__name__)
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/api/admin")
 
+MAX_PAGE_SIZE = 200
+VALID_ROLES = {"user", "admin"}
+MAX_BROADCAST_LEN = 2000
+
 
 @admin_bp.route("/overview", methods=["GET"])
 @require_auth
@@ -117,7 +121,7 @@ def overview():
 def list_users():
     """用户列表（分页）。"""
     page = request.args.get("page", 1, type=int)
-    page_size = request.args.get("page_size", 20, type=int)
+    page_size = min(request.args.get("page_size", 20, type=int), MAX_PAGE_SIZE)
     try:
         from modules.account.db import AccountDB
         db = AccountDB()
@@ -137,6 +141,8 @@ def update_user(user_id: str):
     updates = {k: v for k, v in data.items() if k in allowed}
     if not updates:
         return jsonify({"error": "没有有效的更新字段"}), 400
+    if "role" in updates and updates["role"] not in VALID_ROLES:
+        return jsonify({"error": f"无效角色，允许值: {VALID_ROLES}"}), 400
 
     try:
         from modules.account.db import AccountDB
@@ -173,7 +179,7 @@ def delete_user(user_id: str):
 def list_tasks():
     """全局监控任务列表（跨用户）。"""
     page = request.args.get("page", 1, type=int)
-    page_size = request.args.get("page_size", 20, type=int)
+    page_size = min(request.args.get("page_size", 20, type=int), MAX_PAGE_SIZE)
     owner_id = request.args.get("owner_id")
 
     try:
@@ -196,7 +202,7 @@ def list_tasks():
 def get_push_logs():
     """全局推送日志（分页、可按 task_id/status 过滤）。"""
     page = request.args.get("page", 1, type=int)
-    page_size = request.args.get("page_size", 50, type=int)
+    page_size = min(request.args.get("page_size", 50, type=int), MAX_PAGE_SIZE)
     task_id = request.args.get("task_id")
     status = request.args.get("status")
 
@@ -236,6 +242,8 @@ def broadcast():
     message = data.get("message", "").strip()
     if not message:
         return jsonify({"error": "消息内容不能为空"}), 400
+    if len(message) > MAX_BROADCAST_LEN:
+        return jsonify({"error": f"消息长度不能超过 {MAX_BROADCAST_LEN} 字符"}), 400
 
     try:
         from modules.wcf.db import WCFDB
@@ -265,7 +273,7 @@ def broadcast():
 def list_rss_feeds():
     """全局 RSS 源列表（跨用户）。"""
     page = request.args.get("page", 1, type=int)
-    page_size = request.args.get("page_size", 50, type=int)
+    page_size = min(request.args.get("page_size", 50, type=int), MAX_PAGE_SIZE)
 
     try:
         from modules.rss.db import RSSDB

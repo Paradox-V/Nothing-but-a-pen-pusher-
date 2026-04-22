@@ -68,6 +68,8 @@ def register():
         return jsonify({"error": "用户名格式不正确（2-32位字母数字下划线汉字）"}), 400
     if not _PASSWORD_RE.match(password):
         return jsonify({"error": "密码至少 8 位，需包含字母和数字"}), 400
+    if len(password) > 128:
+        return jsonify({"error": "密码长度不能超过 128 位"}), 400
 
     # 注册权限校验
     registration_enabled = os.environ.get("REGISTRATION_ENABLED", "").lower() == "true"

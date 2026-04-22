@@ -104,12 +104,16 @@ export function useSSE(url: string, body: Record<string, unknown>) {
 }
 
 /** 统一 API 请求工具 — 自动附加 Content-Type 和 Authorization header
- * 优先使用用户 JWT (_user_token)，其次使用管理员 ADMIN_TOKEN (_admin_token)
+ * - /api/admin/* 路径优先使用管理员 Token (_admin_token)
+ * - 其他路径优先使用用户 JWT (_user_token)，其次使用管理员 Token
  */
 export function apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
   const userToken = localStorage.getItem("_user_token")
   const adminToken = localStorage.getItem("_admin_token")
-  const token = userToken || adminToken
+  const isAdminPath = url.startsWith("/admin")
+  const token = isAdminPath
+    ? (adminToken || userToken)
+    : (userToken || adminToken)
   const isBodyMethod = options.method === "POST" || options.method === "PUT" || options.method === "DELETE"
   const headers: Record<string, string> = {
     ...(isBodyMethod ? { "Content-Type": "application/json" } : {}),

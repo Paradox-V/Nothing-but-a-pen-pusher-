@@ -137,12 +137,23 @@ def update_feed(feed_id: str):
     if not existing:
         return jsonify({"success": False, "error": f"源 {feed_id} 不存在"}), 404
 
-    # 构建更新字段
+    # 构建更新字段（带类型校验）
     kwargs = {}
     allowed = {"name", "url", "format", "enabled", "max_items", "max_age_days"}
     for key in allowed:
         if key in data:
-            kwargs[key] = data[key]
+            val = data[key]
+            if key == "enabled":
+                if not isinstance(val, bool):
+                    return jsonify({"success": False, "error": "enabled 必须为布尔值"}), 400
+            elif key in ("max_items", "max_age_days"):
+                try:
+                    val = int(val)
+                    if val < 0:
+                        return jsonify({"success": False, "error": f"{key} 不能为负数"}), 400
+                except (TypeError, ValueError):
+                    return jsonify({"success": False, "error": f"{key} 必须为整数"}), 400
+            kwargs[key] = val
 
     # 如果更新了 URL，需要重新校验
     if "url" in kwargs:
@@ -379,6 +390,8 @@ def bulk_subscribe():
     feeds = data.get("feeds", [])
     if not feeds:
         return jsonify({"success": False, "error": "请提供订阅源列表"}), 400
+    if len(feeds) > 20:
+        return jsonify({"success": False, "error": "单次最多订阅 20 个源"}), 400
 
     db = _get_db()
     success = 0

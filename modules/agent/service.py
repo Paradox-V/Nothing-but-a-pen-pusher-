@@ -1,5 +1,6 @@
 """Agent 模式问答服务 —— ReAct Agent + AgentExecutor + 工具调用 + 持久化"""
 
+import asyncio
 import json
 import logging
 from typing import Generator
@@ -107,19 +108,41 @@ class AgentService:
         agent_input = self._build_agent_input(question, history)
 
         try:
-            import asyncio
+            import queue
+            import threading
+
+            q: queue.Queue = queue.Queue()
+            _SENTINEL = object()
 
             async def _run():
-                events = []
-                async for event in agent_executor.astream_events(
-                    agent_input, version="v1"
-                ):
-                    events.append(event)
-                return events
+                try:
+                    async for event in agent_executor.astream_events(
+                        agent_input, version="v1"
+                    ):
+                        q.put(event)
+                except Exception as exc:
+                    q.put(exc)
+                finally:
+                    q.put(_SENTINEL)
 
-            agent_events = asyncio.run(_run())
+            def _thread_target():
+                loop = asyncio.new_event_loop()
+                try:
+                    loop.run_until_complete(_run())
+                finally:
+                    loop.close()
 
-            for event in agent_events:
+            t = threading.Thread(target=_thread_target, daemon=True)
+            t.start()
+
+            while True:
+                item = q.get()
+                if item is _SENTINEL:
+                    break
+                if isinstance(item, Exception):
+                    raise item
+
+                event = item
                 event_type = event.get("event", "")
 
                 if event_type == "on_tool_start":
