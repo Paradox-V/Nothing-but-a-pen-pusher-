@@ -104,7 +104,9 @@ def require_user_auth(f):
             if not db.is_session_valid(payload["jti"]):
                 return jsonify({"error": "Token 已失效，请重新登录"}), 401
         except Exception:
-            pass  # DB 不可用时跳过吊销检查
+            # 数据库不可用时采取保守策略：拒绝请求
+            logger.warning("Session 验证 DB 不可用，拒绝请求 jti=%s", payload.get("jti", "?"))
+            return jsonify({"error": "认证服务暂时不可用，请稍后重试"}), 503
 
         g.current_user_id = payload["sub"]
         g.current_user_role = payload.get("role", "user")
@@ -136,10 +138,10 @@ def optional_user_auth(f):
                         g.current_user_id = payload["sub"]
                         g.current_user_role = payload.get("role", "user")
                         g.current_user_jti = payload["jti"]
+                    # 若 session 无效（已吊销/过期），视为未登录
                 except Exception:
-                    g.current_user_id = payload["sub"]
-                    g.current_user_role = payload.get("role", "user")
-                    g.current_user_jti = payload["jti"]
+                    # DB 不可用时保守策略：optional 端点不承认登录状态
+                    logger.warning("optional_user_auth: Session DB 不可用，视为未登录")
             except jwt.InvalidTokenError:
                 pass  # 无效 token，视为未登录
         return f(*args, **kwargs)

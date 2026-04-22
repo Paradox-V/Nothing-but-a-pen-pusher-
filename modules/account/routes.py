@@ -81,6 +81,9 @@ def register():
         user = _db.create_user(username, password, email=email)
     except ValueError as e:
         return jsonify({"error": str(e)}), 409
+    except Exception:
+        logger.exception("create_user failed")
+        return jsonify({"error": "注册失败，请稍后重试"}), 500
 
     # 使用邀请码
     if invite_code:

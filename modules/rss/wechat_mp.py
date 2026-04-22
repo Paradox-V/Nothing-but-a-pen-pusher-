@@ -24,8 +24,13 @@ class WechatMPConverter:
         self.config = wechat_mp_config or {}
 
     def is_wechat_mp_url(self, url: str) -> bool:
-        """判断是否为微信公众号链接。"""
-        return "mp.weixin.qq.com" in url
+        """判断是否为微信公众号链接（使用域名精确匹配，防止子字符串欺骗）。"""
+        try:
+            from urllib.parse import urlparse
+            hostname = urlparse(url).hostname or ""
+            return hostname == "mp.weixin.qq.com" or hostname.endswith(".mp.weixin.qq.com")
+        except Exception:
+            return False
 
     def extract_biz(self, url: str) -> str | None:
         """从公众号主页 URL 中提取 __biz 参数。"""
@@ -173,11 +178,31 @@ class WechatMPConverter:
 
     @staticmethod
     def _extract_feed_title(xml_text: str) -> str | None:
-        """从 RSS/Atom XML 中提取 title。"""
-        match = re.search(r"<title[^>]*>([^<]+)</title>", xml_text)
-        if match:
-            title = match.group(1).strip()
-            # 移除 CDATA 包裹
-            title = re.sub(r"^<!\[CDATA\[(.+?)]]>$", r"\1", title).strip()
-            return title or None
+        """从 RSS/Atom XML 中提取 title，优先使用 stdlib XML 解析。"""
+        # 尝试用 feedparser（更健壮）
+        try:
+            import feedparser
+            parsed = feedparser.parse(xml_text)
+            title = parsed.feed.get("title", "").strip()
+            if title:
+                return title
+        except Exception:
+            pass
+
+        # Fallback: 用 ElementTree 解析（处理正规 XML）
+        try:
+            import xml.etree.ElementTree as ET
+            root = ET.fromstring(xml_text)
+            # RSS 2.0: channel/title
+            ns = {"atom": "http://www.w3.org/2005/Atom"}
+            for path in ("./channel/title", "./atom:title"):
+                try:
+                    elem = root.find(path, ns)
+                    if elem is not None and elem.text:
+                        return elem.text.strip()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         return None

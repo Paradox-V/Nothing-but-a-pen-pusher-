@@ -5,6 +5,8 @@ RSS Flask 路由
 提供 RSS 订阅源管理和条目查询的 REST API
 """
 
+import logging
+
 from flask import Blueprint, request, jsonify
 
 from modules.rss.db import RSSDB
@@ -12,6 +14,8 @@ from modules.rss.fetcher import RSSFetcher
 from modules.rss.discover import RSSHubDiscover
 from utils.auth import require_auth
 from utils.url_security import validate_url
+
+logger = logging.getLogger(__name__)
 
 rss_bp = Blueprint("rss", __name__)
 
@@ -296,19 +300,26 @@ def detect_feed_type():
         return jsonify({"success": False, "error": "请提供 URL"}), 400
 
     from modules.rss.wechat_mp import WechatMPConverter
+    from urllib.parse import urlparse
 
     result = {"url": url, "type": "unknown", "suggested_action": "generic_discover"}
+
+    try:
+        parsed_url = urlparse(url)
+        hostname = parsed_url.hostname or ""
+    except Exception:
+        hostname = ""
 
     converter = WechatMPConverter()
     if converter.is_wechat_mp_url(url):
         result["type"] = "wechat_mp"
         result["suggested_action"] = "wechat_discover"
         result["description"] = "微信公众号"
-    elif "weibo.com" in url:
+    elif hostname == "weibo.com" or hostname.endswith(".weibo.com"):
         result["type"] = "weibo"
         result["suggested_action"] = "rsshub_discover"
         result["description"] = "微博"
-    elif "zhihu.com" in url:
+    elif hostname == "zhihu.com" or hostname.endswith(".zhihu.com"):
         result["type"] = "zhihu"
         result["suggested_action"] = "rsshub_discover"
         result["description"] = "知乎"
@@ -352,8 +363,9 @@ def search_rss():
             "topic": topic,
             "results": results,
         })
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception:
+        logger.exception("search_rss failed for topic: %s", topic)
+        return jsonify({"success": False, "error": "搜索服务暂时不可用"}), 500
 
 
 @rss_bp.route("/api/rss/bulk-subscribe", methods=["POST"])
@@ -390,8 +402,9 @@ def bulk_subscribe():
         try:
             db.add_feed(name, url)
             success += 1
-        except Exception as e:
-            errors.append({"url": url, "error": str(e)})
+        except Exception:
+            logger.warning("bulk_subscribe: add_feed failed for url=%s", url)
+            errors.append({"url": url, "error": "添加失败"})
             failed += 1
 
     return jsonify({

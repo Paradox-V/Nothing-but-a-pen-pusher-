@@ -126,6 +126,11 @@ class AccountDB:
         finally:
             conn.close()
 
+    # 允许更新的列名白名单（防止 SQL 注入）
+    _UPDATE_ALLOWED_COLS = frozenset({
+        "username", "email", "enabled", "role", "password_hash", "last_login_at", "updated_at"
+    })
+
     def update_user(self, user_id: str, **kwargs) -> dict | None:
         """更新用户字段，password 自动转 bcrypt。"""
         allowed = {"username", "email", "enabled", "role", "password", "last_login_at"}
@@ -141,6 +146,11 @@ class AccountDB:
 
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         updates["updated_at"] = now
+
+        # 二次过滤列名，确保只有白名单列进入 SET 子句（防 SQL 注入）
+        updates = {k: v for k, v in updates.items() if k in self._UPDATE_ALLOWED_COLS}
+        if not updates:
+            return self.get_user_by_id(user_id)
 
         set_clause = ", ".join(f"{k} = ?" for k in updates)
         values = list(updates.values()) + [user_id]
