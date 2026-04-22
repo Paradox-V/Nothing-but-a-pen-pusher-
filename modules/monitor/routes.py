@@ -29,12 +29,22 @@ def create_task():
     if not name or not keywords:
         return jsonify({"error": "name and keywords are required"}), 400
 
+    # 从用户 JWT 获取 owner_id（若有）
+    owner_id = None
+    try:
+        from utils.jwt_auth import get_current_user_id, optional_user_auth
+        from flask import g
+        owner_id = getattr(g, "current_user_id", None)
+    except Exception:
+        pass
+
     task = _monitor_svc.create_task(
         name=name,
         keywords=keywords,
         filters=data.get("filters"),
         schedule=data.get("schedule", "daily_morning"),
         push_config=data.get("push_config", []),
+        owner_id=owner_id,
     )
     return jsonify(task), 201
 

@@ -45,6 +45,18 @@ export function RssPanel() {
   const [editUrl, setEditUrl] = useState("")
   const toastRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // 微信公众号 RSS 发现
+  const [showWechatDiscover, setShowWechatDiscover] = useState(false)
+  const [wechatUrl, setWechatUrl] = useState("")
+  const [wechatLoading, setWechatLoading] = useState(false)
+  const [wechatResult, setWechatResult] = useState<{ name: string; feed_url: string; warning?: string } | null>(null)
+
+  // AI 话题搜索
+  const [showAiSearch, setShowAiSearch] = useState(false)
+  const [aiSearchTopic, setAiSearchTopic] = useState("")
+  const [aiSearchLoading, setAiSearchLoading] = useState(false)
+  const [aiSearchResults, setAiSearchResults] = useState<{ name: string; feed_url: string; verified: boolean; subscribers: number }[]>([])
+
   const showToast = (msg: string) => {
     if (toastRef.current) clearTimeout(toastRef.current)
     setToast(msg)
@@ -147,6 +159,52 @@ export function RssPanel() {
     } catch { showToast("生成失败") } finally { setCustomLoading(false) }
   }
 
+  const discoverWechat = async () => {
+    if (!wechatUrl) return
+    setWechatLoading(true)
+    setWechatResult(null)
+    try {
+      const res = await apiFetch("/rss/discover/wechat", { method: "POST", body: JSON.stringify({ url: wechatUrl }) })
+      const data = await res.json()
+      if (data.success) {
+        setWechatResult({ name: data.name, feed_url: data.feed_url, warning: data.warning })
+      } else {
+        showToast(data.error || "转换失败")
+      }
+    } catch { showToast("转换失败") } finally { setWechatLoading(false) }
+  }
+
+  const searchAiRss = async () => {
+    if (!aiSearchTopic) return
+    setAiSearchLoading(true)
+    setAiSearchResults([])
+    try {
+      const res = await apiFetch("/rss/search", { method: "POST", body: JSON.stringify({ topic: aiSearchTopic, max_results: 8 }) })
+      const data = await res.json()
+      if (data.success) {
+        setAiSearchResults(data.results || [])
+      } else {
+        showToast(data.error || "搜索失败")
+      }
+    } catch { showToast("搜索失败") } finally { setAiSearchLoading(false) }
+  }
+
+  const bulkSubscribeAi = async () => {
+    const validFeeds = aiSearchResults.filter(r => r.verified)
+    if (!validFeeds.length) { showToast("没有有效的 RSS 源"); return }
+    try {
+      const res = await apiFetch("/rss/bulk-subscribe", {
+        method: "POST",
+        body: JSON.stringify({ feeds: validFeeds.map(r => ({ name: r.name, url: r.feed_url })) }),
+      })
+      const data = await res.json()
+      showToast(`已订阅 ${data.success} 个，失败 ${data.failed} 个`)
+      const feedsRes = await apiFetch("/rss/feeds")
+      setFeeds(await feedsRes.json())
+      setShowDiscover(false)
+    } catch { showToast("批量订阅失败") }
+  }
+
   return (
     <div className="max-w-7xl mx-auto px-6 py-8">
       {/* Toast */}
@@ -243,6 +301,86 @@ export function RssPanel() {
                       {customLoading ? "生成中..." : "生成 RSS 源"}
                     </button>
                     {customResult && <p className="text-[12px] text-accent break-all">{customResult}</p>}
+                  </div>
+                )}
+              </div>
+
+              {/* 微信公众号 RSS 发现 */}
+              <div className="border-t border-border mt-6 pt-4">
+                <button onClick={() => setShowWechatDiscover(!showWechatDiscover)} className="flex items-center gap-2 text-[13px] text-foreground/50 hover:text-foreground/70">
+                  <span className="text-[12px]">💬</span>{showWechatDiscover ? "收起微信公众号" : "微信公众号 RSS"}
+                </button>
+                {showWechatDiscover && (
+                  <div className="space-y-2 mt-3">
+                    <p className="text-[11px] text-foreground/40">输入公众号主页链接（含 __biz 参数）或公众号名称</p>
+                    <div className="flex gap-2">
+                      <input placeholder="公众号链接或名称" value={wechatUrl} onChange={(e) => setWechatUrl(e.target.value)}
+                        className="flex-1 px-3 py-2 bg-muted border border-border rounded-lg text-[13px] text-foreground placeholder:text-foreground/25 focus:outline-none" />
+                      <button onClick={discoverWechat} disabled={wechatLoading}
+                        className={cn("px-4 py-2 rounded-lg text-[13px] font-medium disabled:opacity-50", "bg-accent text-accent-foreground")}>
+                        {wechatLoading ? "..." : "转换"}
+                      </button>
+                    </div>
+                    {wechatResult && (
+                      <div className="flex items-center gap-3 p-3 rounded-xl bg-muted/50 border border-border">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[13px] font-medium">{wechatResult.name}</p>
+                          <p className="text-[11px] text-foreground/40 truncate">{wechatResult.feed_url}</p>
+                          {wechatResult.warning && <p className="text-[11px] text-yellow-500 mt-0.5">{wechatResult.warning}</p>}
+                        </div>
+                        <button
+                          onClick={() => { setNewFeedName(wechatResult.name); setNewFeedUrl(wechatResult.feed_url); setShowDiscover(false); setShowManager(true) }}
+                          className="p-1.5 rounded-lg bg-accent/10 text-accent hover:bg-accent/20"
+                        ><Plus size={14} /></button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* AI 话题搜索 */}
+              <div className="border-t border-border mt-6 pt-4">
+                <button onClick={() => setShowAiSearch(!showAiSearch)} className="flex items-center gap-2 text-[13px] text-foreground/50 hover:text-foreground/70">
+                  <span className="text-[12px]">🤖</span>{showAiSearch ? "收起 AI 搜索" : "AI 话题搜索"}
+                </button>
+                {showAiSearch && (
+                  <div className="space-y-2 mt-3">
+                    <p className="text-[11px] text-foreground/40">输入话题关键词，自动搜寻相关 RSS 订阅源</p>
+                    <div className="flex gap-2">
+                      <input placeholder="如：AI人工智能、A股股市" value={aiSearchTopic} onChange={(e) => setAiSearchTopic(e.target.value)}
+                        className="flex-1 px-3 py-2 bg-muted border border-border rounded-lg text-[13px] text-foreground placeholder:text-foreground/25 focus:outline-none" />
+                      <button onClick={searchAiRss} disabled={aiSearchLoading}
+                        className={cn("px-4 py-2 rounded-lg text-[13px] font-medium disabled:opacity-50", "bg-accent text-accent-foreground")}>
+                        {aiSearchLoading ? "搜索中..." : "搜索"}
+                      </button>
+                    </div>
+                    {aiSearchResults.length > 0 && (
+                      <div className="space-y-2">
+                        {aiSearchResults.map((r, i) => (
+                          <div key={i} className={cn(
+                            "flex items-center gap-3 p-3 rounded-xl border",
+                            r.verified ? "bg-muted/50 border-border" : "bg-muted/30 border-border/50 opacity-70"
+                          )}>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <p className="text-[13px] font-medium text-foreground/80 truncate">{r.name}</p>
+                                {r.verified && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/10 text-green-600 shrink-0">✓</span>}
+                                {r.subscribers > 0 && <span className="text-[10px] text-foreground/30 shrink-0">{r.subscribers.toLocaleString()} 订阅</span>}
+                              </div>
+                              <p className="text-[11px] text-foreground/25 truncate">{r.feed_url}</p>
+                            </div>
+                            <button onClick={() => { setNewFeedName(r.name); setNewFeedUrl(r.feed_url); setShowDiscover(false); setShowManager(true) }}
+                              className="p-1.5 rounded-lg bg-accent/10 text-accent hover:bg-accent/20 shrink-0"><Plus size={14} /></button>
+                          </div>
+                        ))}
+                        <button
+                          onClick={bulkSubscribeAi}
+                          className={cn("w-full py-2 rounded-lg text-[13px] font-medium", "bg-accent/20 text-accent hover:bg-accent/30 transition-all")}
+                        >
+                          一键订阅全部 ({aiSearchResults.filter(r => r.verified).length} 个有效源)
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

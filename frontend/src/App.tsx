@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { ThemeProvider } from "@/hooks/use-theme"
+import { AuthProvider } from "@/hooks/use-auth"
 import { Navbar } from "@/components/layout/Navbar"
 import { Footer } from "@/components/layout/Footer"
 import { Hero } from "@/components/sections/Hero"
@@ -11,6 +12,8 @@ import { RssPanel } from "@/components/sections/RssPanel"
 import { CreatorPanel } from "@/components/sections/CreatorPanel"
 import { ChatPanel } from "@/components/sections/ChatPanel"
 import { MonitorPanel } from "@/components/sections/MonitorPanel"
+import { AccountPanel } from "@/components/sections/AccountPanel"
+import { AdminPanel } from "@/components/sections/AdminPanel"
 
 interface AppStatus {
   news_count?: number
@@ -26,6 +29,8 @@ const panels: Record<string, React.FC> = {
   creator: CreatorPanel,
   chat: ChatPanel,
   monitor: MonitorPanel,
+  account: AccountPanel,
+  admin: AdminPanel,
 }
 
 function AppInner() {
@@ -101,7 +106,9 @@ function AppInner() {
 function App() {
   return (
     <ThemeProvider>
-      <AppInner />
+      <AuthProvider>
+        <AppInner />
+      </AuthProvider>
     </ThemeProvider>
   )
 }

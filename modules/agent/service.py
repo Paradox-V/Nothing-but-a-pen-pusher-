@@ -74,17 +74,20 @@ class AgentService:
         )
         return self._agent_executor
 
-    def chat(self, session_id: str, question: str) -> Generator[str, None, None]:
+    def chat(self, session_id: str, question: str,
+             context: dict | None = None) -> Generator[str, None, None]:
         """Agent 模式对话，持久化语义与 ChatService.chat() 对齐。
 
-        操作顺序（严格对齐 ChatService.chat()）：
-        1. update_session_title_if_empty
-        2. get_recent_messages（先于 save_message）
-        3. save_message(role="user")
-        4. 流式执行 AgentExecutor
-        5. save_message(role="assistant", sources)
-        6. yield done
+        Args:
+            session_id: 会话 ID
+            question: 用户消息
+            context: 可选上下文（binding_id, account_id, user_id, context_token 等），
+                     由微信服务传入，注入 Agent 工具调用链
         """
+        from modules.agent.tools import set_agent_context
+        if context:
+            set_agent_context(context)
+
         # 1. 自动设置会话标题
         self.db.update_session_title_if_empty(session_id, question[:20])
 

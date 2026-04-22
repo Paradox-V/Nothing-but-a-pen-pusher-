@@ -46,6 +46,16 @@ class MonitorDB:
                 CREATE INDEX IF NOT EXISTS idx_push_logs_task
                     ON push_logs(task_id, pushed_at DESC);
             """)
+            # 增量迁移
+            migrations = [
+                "ALTER TABLE monitor_tasks ADD COLUMN owner_id TEXT",
+            ]
+            for sql in migrations:
+                try:
+                    conn.execute(sql)
+                except Exception:
+                    pass
+            conn.commit()
         finally:
             conn.close()
 
@@ -58,16 +68,17 @@ class MonitorDB:
 
     def create_task(self, task_id: str, name: str, keywords: list,
                     filters: dict | None, schedule: str,
-                    push_config: list) -> dict:
+                    push_config: list, owner_id: str | None = None) -> dict:
         conn = self._get_conn()
         try:
             conn.execute(
-                "INSERT INTO monitor_tasks (id, name, keywords, filters, schedule, push_config) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO monitor_tasks (id, name, keywords, filters, schedule, push_config, owner_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (task_id, name, json.dumps(keywords, ensure_ascii=False),
                  json.dumps(filters or {}, ensure_ascii=False),
                  schedule,
-                 json.dumps(push_config, ensure_ascii=False)),
+                 json.dumps(push_config, ensure_ascii=False),
+                 owner_id),
             )
             conn.commit()
             # 查询后再关闭连接
@@ -180,6 +191,61 @@ class MonitorDB:
                 (task_id, limit),
             ).fetchall()
             return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_all_push_logs(self, limit: int = 50, page: int = 1,
+                          task_id: str | None = None,
+                          status: str | None = None) -> dict:
+        """获取全局推送日志（管理员使用）。"""
+        offset = (page - 1) * limit
+        conditions = []
+        params: list = []
+        if task_id:
+            conditions.append("task_id = ?")
+            params.append(task_id)
+        if status:
+            conditions.append("status = ?")
+            params.append(status)
+
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        conn = self._get_conn()
+        try:
+            total = conn.execute(
+                f"SELECT COUNT(*) FROM push_logs {where}", params
+            ).fetchone()[0]
+            rows = conn.execute(
+                f"SELECT id, task_id, status, report_summary, error, pushed_at "
+                f"FROM push_logs {where} ORDER BY pushed_at DESC LIMIT ? OFFSET ?",
+                params + [limit, offset],
+            ).fetchall()
+            return {
+                "items": [dict(r) for r in rows],
+                "total": total,
+                "page": page,
+                "page_size": limit,
+            }
+        finally:
+            conn.close()
+
+    def get_today_push_stats(self) -> dict:
+        """获取今日推送统计（管理员概览用）。"""
+        from datetime import datetime
+        today = datetime.now().strftime("%Y-%m-%d")
+        conn = self._get_conn()
+        try:
+            rows = conn.execute(
+                "SELECT status, COUNT(*) as cnt FROM push_logs "
+                "WHERE pushed_at >= ? GROUP BY status",
+                (today,)
+            ).fetchall()
+            stats = {"success": 0, "fail": 0}
+            for row in rows:
+                if row["status"] == "success":
+                    stats["success"] = row["cnt"]
+                else:
+                    stats["fail"] += row["cnt"]
+            return stats
         finally:
             conn.close()
 

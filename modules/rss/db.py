@@ -58,6 +58,16 @@ class RSSDB:
             CREATE INDEX IF NOT EXISTS idx_rss_feed_id ON rss_items(feed_id);
             CREATE INDEX IF NOT EXISTS idx_rss_crawl_time ON rss_items(crawl_time);
         """)
+        # 增量迁移
+        migrations = [
+            "ALTER TABLE rss_feeds ADD COLUMN owner_id TEXT",
+        ]
+        for sql in migrations:
+            try:
+                conn.execute(sql)
+            except Exception:
+                pass
+        conn.commit()
         conn.close()
 
     # ── Feed CRUD ──────────────────────────────────────────────
@@ -114,7 +124,7 @@ class RSSDB:
         Args:
             name: Feed 名称
             url: Feed URL
-            **kwargs: 其他字段（format, enabled, max_items, max_age_days）
+            **kwargs: 其他字段（format, enabled, max_items, max_age_days, owner_id）
 
         Returns:
             生成的 Feed ID
@@ -136,11 +146,12 @@ class RSSDB:
             enabled = int(kwargs.get("enabled", True))
             max_items = kwargs.get("max_items", 20)
             max_age_days = kwargs.get("max_age_days", 7)
+            owner_id = kwargs.get("owner_id", None)
 
             conn.execute(
-                """INSERT INTO rss_feeds (id, name, url, format, enabled, max_items, max_age_days)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (feed_id, name, url, format_, enabled, max_items, max_age_days),
+                """INSERT INTO rss_feeds (id, name, url, format, enabled, max_items, max_age_days, owner_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (feed_id, name, url, format_, enabled, max_items, max_age_days, owner_id),
             )
             conn.commit()
             return feed_id
