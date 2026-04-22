@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 import { Loading } from "@/components/shared/Loading"
 import { Empty } from "@/components/shared/Empty"
 import { AnimateIn } from "@/components/shared/AnimateIn"
-import { useTheme } from "@/hooks/use-theme"
+
 import { apiFetch } from "@/hooks/use-api"
 
 interface NewsItem {
@@ -57,8 +57,6 @@ export function NewsPanel() {
   const [activeSources, setActiveSources] = useState<string[]>([])
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [showFilters, setShowFilters] = useState(false)
-  const { theme } = useTheme()
-  const v = theme === "vintage"
   const perPage = 20
 
   const fetchNews = useCallback(async () => {
@@ -150,8 +148,8 @@ export function NewsPanel() {
             className={cn(
               "flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-[13px] font-medium border transition-all",
               semantic
-                ? v ? "bg-[#4F7942]/15 border-[#4F7942]/25 text-[#4F7942]" : "bg-accent/10 border-accent/20 text-accent"
-                : v ? "bg-[#4F7942]/8 border-[#4F7942]/15 text-[#4F7942]/60 hover:text-[#4F7942]" : "bg-muted border-border text-foreground/40 hover:text-foreground/60"
+                ? "bg-accent/10 border-accent/20 text-accent"
+                : "bg-accent/8 border-accent/15 text-accent/60 hover:text-accent"
             )}
           >
             <Sparkles size={14} />
@@ -160,7 +158,7 @@ export function NewsPanel() {
           <button
             onClick={() => setShowFilters(!showFilters)}
             className={cn("p-2.5 rounded-xl border transition-all",
-              v ? "bg-[#3B5E32] border-[#3B5E32] text-white hover:bg-[#324F2B]" : showFilters ? "bg-muted border-border" : "bg-muted border-border text-muted-foreground hover:text-foreground"
+              showFilters ? "bg-accent border-accent text-accent-foreground" : "bg-muted border-border text-muted-foreground hover:text-foreground"
             )}
           >
             <Filter size={16} />
@@ -168,7 +166,7 @@ export function NewsPanel() {
           <button
             onClick={handleRefresh}
             className={cn("p-2.5 rounded-xl border transition-all",
-              v ? "bg-[#3B5E32] border-[#3B5E32] text-white hover:bg-[#324F2B]" : "bg-muted border-border text-muted-foreground hover:text-foreground"
+              "bg-muted border-border text-muted-foreground hover:text-foreground"
             )}
           >
             <RefreshCw size={16} />
@@ -262,7 +260,7 @@ export function NewsPanel() {
             disabled={page <= 1}
             onClick={() => setPage(page - 1)}
             className={cn("px-3 h-8 rounded-lg text-[13px] transition-all disabled:opacity-30",
-              v ? "text-[#4F7942]" : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+              "text-accent hover:text-accent/80 hover:bg-accent/8"
             )}
           >上一页</button>
           {getPageNumbers(page, totalPages).map((p, i) =>
@@ -272,8 +270,8 @@ export function NewsPanel() {
               <button key={p} onClick={() => setPage(p)}
                 className={cn("w-8 h-8 rounded-lg text-[13px] font-medium transition-all",
                   p === page
-                    ? v ? "bg-[#4F7942]/15 text-[#4F7942]" : "bg-muted text-foreground"
-                    : v ? "text-[#4F7942]/40 hover:text-[#4F7942]/70 hover:bg-[#4F7942]/8" : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                    ? "bg-accent/15 text-accent"
+                    : "text-accent/40 hover:text-accent/70 hover:bg-accent/8"
                 )}
               >{p}</button>
             )
@@ -282,7 +280,7 @@ export function NewsPanel() {
             disabled={page >= totalPages}
             onClick={() => setPage(page + 1)}
             className={cn("px-3 h-8 rounded-lg text-[13px] transition-all disabled:opacity-30",
-              v ? "text-[#4F7942]" : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+              "text-accent hover:text-accent/80 hover:bg-accent/8"
             )}
           >下一页</button>
         </div>

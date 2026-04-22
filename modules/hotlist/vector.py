@@ -72,7 +72,7 @@ class HotlistVectorEngine:
         if not embeddings:
             return 0
 
-        new_items, new_embs, new_ids, new_metas = [], [], [], []
+        new_items, new_embs, new_ids, new_metas, new_docs = [], [], [], [], []
 
         for i, (item, emb) in enumerate(zip(items, embeddings)):
             # 去重：与已有向量比较
@@ -91,6 +91,7 @@ class HotlistVectorEngine:
             new_items.append(item)
             new_embs.append(emb)
             new_ids.append(item_id)
+            new_docs.append(texts[i])
             new_metas.append({
                 "title": item["title"][:200],
                 "platform": item.get("platform", ""),
@@ -105,7 +106,7 @@ class HotlistVectorEngine:
                 ids=new_ids,
                 embeddings=new_embs,
                 metadatas=new_metas,
-                documents=texts[:len(new_ids)],
+                documents=new_docs,
             )
             logger.info("热榜 ChromaDB 新增 %d 条", len(new_ids))
 

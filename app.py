@@ -51,7 +51,7 @@ def index():
     return send_from_directory(_REACT_DIST, "index.html")
 
 
-@app.route("/<path:path>", methods=["GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
+@app.route("/<path:path>", methods=["GET", "HEAD"])
 def spa_fallback(path):
     """React SPA fallback: 非 API、非文件路由返回 index.html"""
     # /api/* 未命中任何已注册路由时，返回 JSON 404 而非前端 HTML
@@ -81,8 +81,10 @@ def api_status():
             _arch_path = os.path.join(os.path.dirname(news_db.db_path), "archive", "news_archive.db")
             if os.path.exists(_arch_path):
                 _arch_conn = _sq.connect(_arch_path)
-                count += _arch_conn.execute("SELECT COUNT(*) FROM news").fetchone()[0]
-                _arch_conn.close()
+                try:
+                    count += _arch_conn.execute("SELECT COUNT(*) FROM news").fetchone()[0]
+                finally:
+                    _arch_conn.close()
         except Exception:
             pass
         status["news_count"] = count

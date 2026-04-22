@@ -44,9 +44,7 @@ export function Hero({ stats, onExplore }: HeroProps) {
           transition={{ delay: 0.2, duration: 0.5 }}
           className={cn(
             "inline-flex items-center gap-2 px-4 py-1.5 rounded-full border text-[12px] font-medium tracking-wide uppercase mb-8",
-            v
-              ? "bg-[#4F7942]/10 border-[#4F7942]/20 text-[#4F7942]"
-              : "bg-muted border-border text-muted-foreground"
+            "bg-accent/10 border-accent/20 text-accent"
           )}
         >
           <Sparkles size={13} className="text-accent" />
@@ -58,7 +56,7 @@ export function Hero({ stats, onExplore }: HeroProps) {
           信息，
           <br />
           <span className={v
-            ? "bg-gradient-to-r from-[#2C2E31] via-[#4F7942] to-[#3B5E32] bg-clip-text text-transparent"
+            ? "bg-gradient-to-r from-foreground via-accent to-accent/80 bg-clip-text text-transparent"
             : "bg-gradient-to-r from-white via-white/90 to-white/60 bg-clip-text text-transparent"
           }>
             尽在掌握。
@@ -87,7 +85,7 @@ export function Hero({ stats, onExplore }: HeroProps) {
           >
             {stats.newsCount != null && (
               <span>
-                <span className={v ? "text-[#4F7942] font-medium tabular-nums" : "text-foreground/70 font-medium tabular-nums"}>
+                <span className={"text-accent font-medium tabular-nums"}>
                   {stats.newsCount.toLocaleString()}
                 </span>{" "}
                 篇新闻
@@ -95,7 +93,7 @@ export function Hero({ stats, onExplore }: HeroProps) {
             )}
             {stats.rssCount != null && (
               <span>
-                <span className={v ? "text-[#4F7942] font-medium tabular-nums" : "text-foreground/70 font-medium tabular-nums"}>
+                <span className={"text-accent font-medium tabular-nums"}>
                   {stats.rssCount}
                 </span>{" "}
                 个订阅源
@@ -104,7 +102,7 @@ export function Hero({ stats, onExplore }: HeroProps) {
             {stats.aiReady && (
               <span className="flex items-center gap-1.5">
                 <span className={v
-                  ? "w-2 h-2 rounded-full bg-[#4F7942] animate-pulse"
+                  ? "w-2 h-2 rounded-full bg-accent animate-pulse"
                   : "w-1.5 h-1.5 rounded-full bg-[#30d158] animate-pulse"
                 } />
                 AI 就绪
@@ -123,7 +121,7 @@ export function Hero({ stats, onExplore }: HeroProps) {
           <button
             onClick={onExplore}
             className={v
-              ? "group inline-flex items-center gap-2 px-8 py-3.5 bg-[#4F7942] text-white text-[15px] font-semibold rounded-full hover:bg-[#3B5E32] transition-all hover:gap-3 shadow-lg shadow-[#4F7942]/20"
+              ? "group inline-flex items-center gap-2 px-8 py-3.5 bg-accent text-white text-[15px] font-semibold rounded-full hover:bg-accent/80 transition-all hover:gap-3 shadow-lg shadow-accent/20"
               : "group inline-flex items-center gap-2 px-7 py-3 bg-white text-black text-[15px] font-semibold rounded-full hover:bg-white/90 transition-all hover:gap-3"
             }
           >

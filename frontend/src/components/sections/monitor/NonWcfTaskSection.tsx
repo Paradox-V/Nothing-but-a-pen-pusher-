@@ -2,16 +2,17 @@ import { useState } from "react"
 import { motion } from "framer-motion"
 import { Plus, Play, Trash2, Clock, Tag, Settings2 } from "lucide-react"
 import { cn } from "@/lib/utils"
+
 import { apiFetch } from "@/hooks/use-api"
 import { Empty } from "@/components/shared/Empty"
+import { Dropdown } from "@/components/shared/Dropdown"
 import type { MonitorTask, PushLog } from "./types"
-import { SCHEDULE_OPTIONS, NON_WCF_CHANNEL_TYPES, CHANNEL_HINTS } from "./types"
+import { SCHEDULE_DEFAULTS, formatSchedule, NON_WCF_CHANNEL_TYPES, CHANNEL_HINTS } from "./types"
 
 interface NonWcfTaskSectionProps {
   tasks: MonitorTask[]
   expandedTask: string | null
   logs: PushLog[]
-  v: boolean
   onLoadTasks: () => void
   onToggleExpandTask: (taskId: string | null) => void
   onRunTask: (taskId: string) => void
@@ -19,13 +20,13 @@ interface NonWcfTaskSectionProps {
 }
 
 export function NonWcfTaskSection({
-  tasks, expandedTask, logs, v,
+  tasks, expandedTask, logs,
   onLoadTasks, onToggleExpandTask, onRunTask, onDeleteTask,
 }: NonWcfTaskSectionProps) {
   const [showCreate, setShowCreate] = useState(false)
   const [formName, setFormName] = useState("")
   const [formKeywords, setFormKeywords] = useState("")
-  const [formSchedule, setFormSchedule] = useState("daily_morning")
+  const [formSchedule, setFormSchedule] = useState("08:00")
   const [formChannelType, setFormChannelType] = useState("wecom")
   const [formChannelUrl, setFormChannelUrl] = useState("")
   const [formChannelSecret, setFormChannelSecret] = useState("")
@@ -69,12 +70,12 @@ export function NonWcfTaskSection({
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <h3 className={cn("text-sm font-medium", v ? "text-[#2C2E31]" : "text-foreground")}>
+        <h3 className={cn("text-sm font-medium", "text-foreground")}>
           其他推送渠道
         </h3>
         <button onClick={() => setShowCreate(!showCreate)}
           className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
-            v ? "bg-[#4F7942] text-white hover:bg-[#3B5E32]" : "bg-accent text-accent-foreground hover:bg-accent/90"
+            "bg-accent text-accent-foreground hover:bg-accent/80"
           )}
         ><Plus size={13} /> 新建任务</button>
       </div>
@@ -83,7 +84,7 @@ export function NonWcfTaskSection({
       {showCreate && (
         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}
           className={cn("mb-4 p-4 rounded-2xl border space-y-3",
-            v ? "bg-[#E8E9E4] border-[#4F7942]/20" : "bg-card border-border"
+            "bg-card border-accent/20"
           )}
         >
           <div className="grid grid-cols-2 gap-3">
@@ -95,10 +96,9 @@ export function NonWcfTaskSection({
             </div>
             <div>
               <label className="text-xs text-foreground/50 mb-1 block">推送时间</label>
-              <select value={formSchedule} onChange={(e) => setFormSchedule(e.target.value)}
-                className="w-full px-3 py-2 bg-muted border border-border rounded-lg text-sm text-foreground focus:outline-none">
-                {SCHEDULE_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-              </select>
+              <Dropdown value={formSchedule} onChange={setFormSchedule}
+                options={SCHEDULE_DEFAULTS.map(t => ({ value: t, label: t }))}
+                className="text-sm" />
             </div>
           </div>
           <div>
@@ -110,10 +110,8 @@ export function NonWcfTaskSection({
           <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="text-xs text-foreground/50 mb-1 block">推送渠道</label>
-              <select value={formChannelType} onChange={(e) => setFormChannelType(e.target.value)}
-                className="w-full px-3 py-2 bg-muted border border-border rounded-lg text-sm text-foreground focus:outline-none">
-                {NON_WCF_CHANNEL_TYPES.map((ct) => <option key={ct.value} value={ct.value}>{ct.label}</option>)}
-              </select>
+              <Dropdown value={formChannelType} onChange={setFormChannelType}
+                options={NON_WCF_CHANNEL_TYPES} className="text-sm" />
             </div>
             <div>
               <label className="text-xs text-foreground/50 mb-1 block">
@@ -135,7 +133,7 @@ export function NonWcfTaskSection({
           <div className="flex items-center gap-3">
             <button onClick={createTask}
               className={cn("px-4 py-2 rounded-lg text-sm font-medium",
-                v ? "bg-[#4F7942] text-white hover:bg-[#3B5E32]" : "bg-accent text-accent-foreground hover:bg-accent/90"
+                "bg-accent text-accent-foreground hover:bg-accent/80"
               )}>创建任务</button>
             <button onClick={testPush}
               className="px-4 py-2 rounded-lg text-sm font-medium bg-muted text-foreground/60 hover:text-foreground/80 border border-border">测试推送</button>
@@ -153,7 +151,7 @@ export function NonWcfTaskSection({
           {tasks.map((task) => (
             <div key={task.id}
               className={cn("rounded-2xl border overflow-hidden transition-all",
-                v ? "bg-[#E8E9E4] border-[#4F7942]/10" : "bg-card border-border"
+                "bg-card border-accent/10"
               )}
             >
               <div className="flex items-center gap-3 px-5 py-4 cursor-pointer" onClick={() => onToggleExpandTask(task.id)}>
@@ -171,7 +169,7 @@ export function NonWcfTaskSection({
                   </div>
                   <div className="flex items-center gap-3 mt-1.5 text-xs text-foreground/40">
                     <span className="flex items-center gap-1"><Tag size={10} /> {(task.keywords as unknown as string[])?.join("、")}</span>
-                    <span className="flex items-center gap-1"><Clock size={10} /> {SCHEDULE_OPTIONS.find((o) => o.value === task.schedule)?.label || task.schedule}</span>
+                    <span className="flex items-center gap-1"><Clock size={10} /> {formatSchedule(task.schedule)}</span>
                     {task.last_run_at && <span>上次推送: {task.last_run_at}</span>}
                   </div>
                 </div>

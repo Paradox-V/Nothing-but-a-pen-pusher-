@@ -40,9 +40,7 @@ export function Navbar({ activeTab, onTabChange }: NavbarProps) {
         className={cn(
           "fixed top-0 left-0 right-0 z-50 transition-all duration-500",
           scrolled
-            ? isVintage
-              ? "bg-[#E8E9E4]/80 backdrop-blur-2xl border-b border-border"
-              : "bg-black/70 backdrop-blur-2xl border-b border-border"
+            ? "bg-background/80 backdrop-blur-2xl border-b border-border"
             : "bg-transparent"
         )}
       >
@@ -63,14 +61,14 @@ export function Navbar({ activeTab, onTabChange }: NavbarProps) {
                 className={cn(
                   "relative px-3 py-1.5 text-[13px] font-medium rounded-full transition-colors",
                   activeTab === link.tab
-                    ? isVintage ? "text-white" : "text-foreground"
-                    : isVintage ? "text-[#2C2E31]/50 hover:text-[#2C2E31]/80" : "text-foreground/50 hover:text-foreground/80"
+                    ? "text-foreground"
+                    : "text-foreground/50 hover:text-foreground/80"
                 )}
               >
                 {activeTab === link.tab && (
                   <motion.span
                     layoutId="nav-pill"
-                    className={cn("absolute inset-0 rounded-full", isVintage ? "bg-[#3B5E32]" : "bg-muted")}
+                    className={cn("absolute inset-0 rounded-full", isVintage ? "bg-accent" : "bg-muted")}
                     transition={{ type: "spring", stiffness: 300, damping: 30 }}
                   />
                 )}
@@ -82,7 +80,7 @@ export function Navbar({ activeTab, onTabChange }: NavbarProps) {
           <div className="flex items-center gap-2">
             <button
               onClick={toggle}
-              className={cn("p-2 rounded-full transition-all", isVintage ? "text-[#4F7942] hover:bg-[#4F7942]/10" : "text-foreground/40 hover:text-foreground/70 hover:bg-muted")}
+              className={cn("p-2 rounded-full transition-all", "text-accent hover:bg-accent/10")}
               title={isVintage ? "切换深色模式" : "切换复古白模式"}
             >
               {isVintage ? <Moon size={16} /> : <Sun size={16} />}
@@ -115,7 +113,7 @@ export function Navbar({ activeTab, onTabChange }: NavbarProps) {
             exit={{ opacity: 0, y: -10 }}
             className={cn(
               "fixed top-14 left-0 right-0 z-40 backdrop-blur-2xl border-b border-border md:hidden",
-              isVintage ? "bg-[#E8E9E4]/90" : "bg-black/90"
+              "bg-background/90"
             )}
           >
             <div className="px-6 py-3 flex flex-col gap-1">
@@ -129,8 +127,8 @@ export function Navbar({ activeTab, onTabChange }: NavbarProps) {
                   className={cn(
                     "px-4 py-2.5 text-[14px] font-medium rounded-xl text-left transition-colors",
                     activeTab === link.tab
-                      ? isVintage ? "text-white bg-[#3B5E32]" : "text-foreground bg-muted"
-                      : isVintage ? "text-[#2C2E31]/50 hover:text-[#2C2E31]/80" : "text-foreground/50 hover:text-foreground/80"
+                      ? isVintage ? "text-white bg-accent" : "text-foreground bg-muted"
+                      : "text-foreground/50 hover:text-foreground/80"
                   )}
                 >
                   {link.label}

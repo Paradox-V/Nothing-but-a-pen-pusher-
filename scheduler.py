@@ -15,9 +15,8 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from urllib.parse import urlparse, parse_qs
 
-# 离线模式：跳过 HuggingFace 网络检查
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
-os.environ["HF_HUB_OFFLINE"] = "1"
+# 离线模式：跳过 HuggingFace 网络检查（仅在 __main__ 中设置）
+# 注意：不可在模块级设置，否则影响其他导入此模块的代码
 
 from utils.config import load_config
 from modules.news.db import NewsDB
@@ -41,6 +40,16 @@ logger = logging.getLogger(__name__)
 # ── 内部向量 API ─────────────────────────────────────────────
 
 VECTOR_API_PORT = 5001
+MAX_REQUEST_BODY = 10 * 1024 * 1024  # 10 MB
+
+
+def _safe_int(value_str, default, min_val=1, max_val=200):
+    """安全解析整数参数，带范围限制。"""
+    try:
+        val = int(value_str)
+        return max(min_val, min(val, max_val))
+    except (ValueError, TypeError):
+        return default
 
 
 class _ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
@@ -88,7 +97,7 @@ class _VectorAPIHandler(BaseHTTPRequestHandler):
             self._json({"error": "向量引擎未初始化"}, 503)
             return
 
-        n = int(params.get("n", ["20"])[0])
+        n = _safe_int(params.get("n", ["20"])[0], 20)
         cat_raw = params.get("category", [None])[0]
         src_raw = params.get("source", [None])[0]
         categories = cat_raw.split(",") if cat_raw else None
@@ -114,6 +123,9 @@ class _VectorAPIHandler(BaseHTTPRequestHandler):
         content_length = int(self.headers.get("Content-Length", 0))
         if content_length == 0:
             self._json({"error": "empty body"}, 400)
+            return
+        if content_length > MAX_REQUEST_BODY:
+            self._json({"error": "request body too large"}, 413)
             return
         body = self.rfile.read(content_length)
         try:
@@ -184,8 +196,8 @@ class _VectorAPIHandler(BaseHTTPRequestHandler):
             keyword=params.get("keyword", [None])[0],
             date_from=params.get("date_from", [None])[0],
             date_to=params.get("date_to", [None])[0],
-            page=int(params.get("page", ["1"])[0]),
-            per_page=int(params.get("per_page", ["30"])[0]),
+            page=_safe_int(params.get("page", ["1"])[0], 1),
+            per_page=_safe_int(params.get("per_page", ["30"])[0], 30, 1, 100),
         )
         self._json(result)
 
@@ -196,8 +208,8 @@ class _VectorAPIHandler(BaseHTTPRequestHandler):
         params = parse_qs(parsed.query)
         result = self.archive_manager.search_hotlist(
             platform=params.get("platform", [None])[0],
-            page=int(params.get("page", ["1"])[0]),
-            per_page=int(params.get("per_page", ["30"])[0]),
+            page=_safe_int(params.get("page", ["1"])[0], 1),
+            per_page=_safe_int(params.get("per_page", ["30"])[0], 30, 1, 100),
         )
         self._json(result)
 
@@ -209,8 +221,8 @@ class _VectorAPIHandler(BaseHTTPRequestHandler):
         result = self.archive_manager.search_rss(
             feed_id=params.get("feed_id", [None])[0],
             keyword=params.get("keyword", [None])[0],
-            page=int(params.get("page", ["1"])[0]),
-            per_page=int(params.get("per_page", ["30"])[0]),
+            page=_safe_int(params.get("page", ["1"])[0], 1),
+            per_page=_safe_int(params.get("per_page", ["30"])[0], 30, 1, 100),
         )
         self._json(result)
 
@@ -250,6 +262,10 @@ def _start_vector_api(vector_engine, hotlist_vector=None, rss_vector=None, archi
 
 
 def main():
+    # 离线模式：跳过 HuggingFace 网络检查
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+    os.environ["HF_HUB_OFFLINE"] = "1"
+
     config = load_config()
     sched_cfg = config.get("scheduler", {})
     purge_days = sched_cfg.get("purge_days", 7)
@@ -373,12 +389,16 @@ def main():
     while True:
         time.sleep(1)
 
-        # 更新心跳
-        try:
-            with open(heartbeat_path, "w") as f:
-                f.write(datetime.now().isoformat())
-        except Exception:
-            pass
+        # 更新心跳（每 30 秒写入一次，减少文件 I/O）
+        heartbeat_counter = getattr(main, '_hb_cnt', 0) + 1
+        if heartbeat_counter >= 30:
+            heartbeat_counter = 0
+            try:
+                with open(heartbeat_path, "w") as f:
+                    f.write(datetime.now().isoformat())
+            except Exception:
+                pass
+        main._hb_cnt = heartbeat_counter
 
         # 检查 Web 触发的抓取信号
         try:

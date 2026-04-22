@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react"
-import { cn } from "@/lib/utils"
-import { useTheme } from "@/hooks/use-theme"
+import { motion, AnimatePresence } from "framer-motion"
+import { AlertCircle } from "lucide-react"
 import { apiFetch } from "@/hooks/use-api"
 import type { MonitorTask, PushLog, WcfAccount, WcfBinding } from "./types"
 import { isWcfTask } from "./types"
@@ -15,9 +15,6 @@ export function MonitorPanel() {
   // WCF state
   const [wcfAccounts, setWcfAccounts] = useState<WcfAccount[]>([])
   const [wcfBindings, setWcfBindings] = useState<WcfBinding[]>([])
-
-  const { theme } = useTheme()
-  const v = theme === "vintage"
 
   useEffect(() => { loadTasks() }, [])
   useEffect(() => { loadWcfAccounts() }, [])
@@ -64,14 +61,23 @@ export function MonitorPanel() {
   }, [])
 
   const [runningTaskId, setRunningTaskId] = useState<string | null>(null)
+  const [toast, setToast] = useState<string | null>(null)
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const fallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const toastRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const showToast = (msg: string) => {
+    if (toastRef.current) clearTimeout(toastRef.current)
+    setToast(msg)
+    toastRef.current = setTimeout(() => setToast(null), 3000)
+  }
 
   // 组件卸载时清理轮询
   useEffect(() => {
     return () => {
       if (pollingRef.current) clearInterval(pollingRef.current)
       if (fallbackRef.current) clearTimeout(fallbackRef.current)
+      if (toastRef.current) clearTimeout(toastRef.current)
     }
   }, [])
 
@@ -82,13 +88,13 @@ export function MonitorPanel() {
       const res = await apiFetch(`/monitor/tasks/${id}/run`, { method: "POST" })
       if (res.status === 409) {
         const data = await res.json().catch(() => ({}))
-        alert(data.reason || "任务正在执行中")
+        showToast(data.reason || "任务正在执行中")
         setRunningTaskId(null)
         return
       }
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        alert(`执行失败: ${data.error || res.status}`)
+        showToast(`执行失败: ${data.error || res.status}`)
         setRunningTaskId(null)
         return
       }
@@ -128,7 +134,7 @@ export function MonitorPanel() {
         loadTasks()
       }, 60000)
     } catch (err) {
-      alert(`请求失败: ${err}`)
+      showToast(`请求失败: ${err}`)
       setRunningTaskId(null)
     }
   }
@@ -153,8 +159,17 @@ export function MonitorPanel() {
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-8">
+      {/* Toast */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}
+            className="fixed top-4 right-4 z-[100] px-4 py-2.5 rounded-xl bg-card border border-border text-[13px] text-foreground shadow-lg flex items-center gap-2"
+          ><AlertCircle size={14} className="text-accent" />{toast}</motion.div>
+        )}
+      </AnimatePresence>
+
       <div className="mb-6">
-        <h2 className={cn("text-2xl font-bold", v ? "text-[#2C2E31]" : "text-foreground")}>定时监控</h2>
+        <h2 className="text-2xl font-bold text-foreground">定时监控</h2>
         <p className="text-sm text-foreground/40 mt-1">设置关键词监控任务，Agent 自动收集并定时推送报告</p>
       </div>
 
@@ -164,7 +179,6 @@ export function MonitorPanel() {
         tasks={tasks}
         expandedTask={expandedTask}
         logs={logs}
-        v={v}
         onLoadAccounts={loadWcfAccounts}
         onLoadBindings={loadWcfBindings}
         onLoadTasks={loadTasks}
@@ -178,7 +192,6 @@ export function MonitorPanel() {
         tasks={nonWcfTasks}
         expandedTask={expandedTask}
         logs={logs}
-        v={v}
         onLoadTasks={loadTasks}
         onToggleExpandTask={toggleExpand}
         onRunTask={runTask}

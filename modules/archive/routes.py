@@ -6,12 +6,14 @@
 
 from flask import Blueprint, jsonify, request
 
+from utils.auth import require_auth
 from utils.scheduler_client import scheduler_get
 
 archive_bp = Blueprint("archive", __name__)
 
 
 @archive_bp.route("/api/archive/news")
+@require_auth
 def archive_news():
     """浏览归档新闻。"""
     params = {"page": str(request.args.get("page", 1, type=int)),
@@ -27,6 +29,7 @@ def archive_news():
 
 
 @archive_bp.route("/api/archive/hotlist")
+@require_auth
 def archive_hotlist():
     """浏览归档热榜。"""
     params = {"page": str(request.args.get("page", 1, type=int)),
@@ -41,6 +44,7 @@ def archive_hotlist():
 
 
 @archive_bp.route("/api/archive/rss")
+@require_auth
 def archive_rss():
     """浏览归档 RSS。"""
     params = {"page": str(request.args.get("page", 1, type=int)),

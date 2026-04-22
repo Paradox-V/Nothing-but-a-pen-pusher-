@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react"
 import { Smartphone, ChevronDown, ChevronRight, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
+
 import { apiFetch } from "@/hooks/use-api"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import type { WcfAccount, WcfBinding, MonitorTask, PushLog } from "./types"
@@ -12,7 +13,6 @@ interface WechatAccountSectionProps {
   tasks: MonitorTask[]
   expandedTask: string | null
   logs: PushLog[]
-  v: boolean
   onLoadAccounts: () => void
   onLoadBindings: () => void
   onLoadTasks: () => void
@@ -23,7 +23,7 @@ interface WechatAccountSectionProps {
 }
 
 export function WechatAccountSection({
-  wcfAccounts, wcfBindings, tasks, expandedTask, logs, v,
+  wcfAccounts, wcfBindings, tasks, expandedTask, logs,
   onLoadAccounts, onLoadBindings, onLoadTasks,
   onRunTask, onDeleteTask, onToggleExpandTask, runningTaskId,
 }: WechatAccountSectionProps) {
@@ -140,14 +140,14 @@ export function WechatAccountSection({
   return (
     <div className="mb-6">
       {/* Connection status card */}
-      <div className={cn("p-4 rounded-2xl border", v ? "bg-[#E8E9E4] border-[#4F7942]/10" : "bg-card border-border")}>
+      <div className={cn("p-4 rounded-2xl border", "bg-card border-accent/10")}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className={cn("p-2 rounded-xl", v ? "bg-[#4F7942]/10" : "bg-accent/10")}>
-              <Smartphone size={18} className={v ? "text-[#4F7942]" : "text-accent"} />
+            <div className={cn("p-2 rounded-xl", "bg-accent/10")}>
+              <Smartphone size={18} className={"text-accent"} />
             </div>
             <div>
-              <h3 className={cn("text-sm font-medium", v ? "text-[#2C2E31]" : "text-foreground")}>
+              <h3 className={cn("text-sm font-medium", "text-foreground")}>
                 微信账号管理
               </h3>
               <p className="text-xs text-foreground/40">
@@ -165,7 +165,7 @@ export function WechatAccountSection({
             ))}
             <button onClick={() => { setShowQRDialog(true); startLogin() }}
               className={cn("px-3 py-1.5 rounded-lg text-xs font-medium",
-                v ? "bg-[#4F7942] text-white hover:bg-[#3B5E32]" : "bg-accent text-accent-foreground hover:bg-accent/90"
+                "bg-accent text-accent-foreground hover:bg-accent/80"
               )}>
               + 添加微信
             </button>
@@ -216,12 +216,12 @@ export function WechatAccountSection({
         const account = wcfAccounts.find(a => a.account_id === accountId)
         return (
           <div key={accountId} className={cn("mt-3 rounded-2xl border overflow-hidden",
-            v ? "bg-[#E8E9E4] border-[#4F7942]/10" : "bg-card border-border"
+            "bg-card border-accent/10"
           )}>
             <button
               onClick={() => toggleAccount(accountId)}
               className={cn("w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-muted/30 transition-all",
-                v ? "text-[#2C2E31]" : "text-foreground"
+                "text-foreground"
               )}
             >
               {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -240,7 +240,6 @@ export function WechatAccountSection({
                     tasks={tasks}
                     expandedTask={expandedTask}
                     logs={logs}
-                    v={v}
                     onCreateTask={(name, keywords, schedule) => createTaskAndBind(b.id, name, keywords, schedule)}
                     onUnbindTask={(taskId) => unbindTask(b.id, taskId)}
                     onToggleEnabled={() => toggleBindingEnabled(b.id, !b.enabled)}

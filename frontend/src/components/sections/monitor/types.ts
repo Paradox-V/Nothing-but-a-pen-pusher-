@@ -37,10 +37,21 @@ export interface WcfBinding {
   task_ids: string[]
 }
 
-export const SCHEDULE_OPTIONS = [
-  { value: "daily_morning", label: "每日早报 (08:00)" },
-  { value: "daily_evening", label: "每日晚报 (20:00)" },
+export const SCHEDULE_DEFAULTS = [
+  "08:00", "09:00", "10:00", "12:00", "14:00", "16:00", "18:00", "20:00", "22:00",
 ]
+
+export function formatSchedule(schedule: string): string {
+  if (/^\d{2}:\d{2}$/.test(schedule)) {
+    return `每日 ${schedule}`
+  }
+  // 兼容旧格式
+  const legacy: Record<string, string> = {
+    daily_morning: "每日 08:00",
+    daily_evening: "每日 20:00",
+  }
+  return legacy[schedule] || schedule
+}
 
 export const NON_WCF_CHANNEL_TYPES = [
   { value: "wecom", label: "企业微信" },

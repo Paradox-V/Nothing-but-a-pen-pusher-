@@ -8,6 +8,7 @@
 也可通过 .env 文件配置（python-dotenv）
 """
 import os
+import shlex
 import time
 import paramiko
 
@@ -96,12 +97,15 @@ FILES = [
 ]
 
 
-def ssh_exec(ssh, cmd, sudo=False):
-    """执行命令，支持 sudo"""
+def ssh_exec(ssh, cmd, sudo=False, check=False):
+    """执行命令，支持 sudo。check=True 时检查返回码。"""
     if sudo:
         cmd = f"sudo {cmd}"
     stdin, stdout, stderr = ssh.exec_command(cmd)
-    return stdout.read().decode(), stderr.read().decode()
+    out, err = stdout.read().decode(), stderr.read().decode()
+    if check and stdout.channel.recv_exit_status() != 0:
+        raise RuntimeError(f"命令失败: {cmd}\nstderr: {err}")
+    return out, err
 
 
 def main():
@@ -130,7 +134,7 @@ def main():
 
     # 在 /tmp 创建临时上传目录
     TMP_DIR = "/tmp/news_deploy"
-    ssh_exec(ssh, f"rm -rf {TMP_DIR} && mkdir -p {TMP_DIR}")
+    ssh_exec(ssh, f"rm -rf {shlex.quote(TMP_DIR)} && mkdir -p {shlex.quote(TMP_DIR)}")
 
     # 用 SFTP 上传到 /tmp
     sftp = ssh.open_sftp()
@@ -143,7 +147,7 @@ def main():
             continue
         remote_dir = os.path.dirname(f).replace("\\", "/")
         if remote_dir:
-            ssh_exec(ssh, f"mkdir -p {TMP_DIR}/{remote_dir}")
+            ssh_exec(ssh, f"mkdir -p {shlex.quote(TMP_DIR + '/' + remote_dir)}")
         tmp_remote = f"{TMP_DIR}/{f}".replace("\\", "/")
         print(f"  上传: {f}")
         sftp.put(local_path, tmp_remote)
@@ -158,7 +162,7 @@ def main():
                 rel_path = os.path.relpath(local_file, LOCAL_BASE).replace("\\", "/")
                 remote_dir = os.path.dirname(rel_path).replace("\\", "/")
                 if remote_dir:
-                    ssh_exec(ssh, f"mkdir -p {TMP_DIR}/{remote_dir}")
+                    ssh_exec(ssh, f"mkdir -p {shlex.quote(TMP_DIR + '/' + remote_dir)}")
                 print(f"  上传: {rel_path}")
                 sftp.put(local_file, f"{TMP_DIR}/{rel_path}")
 
@@ -169,22 +173,24 @@ def main():
     for f in FILES:
         remote_dir = os.path.dirname(f).replace("\\", "/")
         if remote_dir:
-            ssh_exec(ssh, f"mkdir -p {REMOTE_BASE}/{remote_dir}", sudo=True)
-        ssh_exec(ssh, f"cp {TMP_DIR}/{f} {REMOTE_BASE}/{f}", sudo=True)
+            ssh_exec(ssh, f"mkdir -p {shlex.quote(REMOTE_BASE + '/' + remote_dir)}", sudo=True)
+        src = shlex.quote(f"{TMP_DIR}/{f}")
+        dst = shlex.quote(f"{REMOTE_BASE}/{f}")
+        ssh_exec(ssh, f"cp {src} {dst}", sudo=True)
         print(f"  已部署: {f}")
 
     # 复制前端构建产物
     if os.path.isdir(frontend_dist):
-        ssh_exec(ssh, f"mkdir -p {REMOTE_BASE}/frontend_dist/assets", sudo=True)
-        ssh_exec(ssh, f"cp -r {TMP_DIR}/frontend_dist/* {REMOTE_BASE}/frontend_dist/", sudo=True)
+        ssh_exec(ssh, f"mkdir -p {shlex.quote(REMOTE_BASE + '/frontend_dist/assets')}", sudo=True)
+        ssh_exec(ssh, f"cp -r {shlex.quote(TMP_DIR + '/frontend_dist/*')} {shlex.quote(REMOTE_BASE + '/frontend_dist/')}", sudo=True)
         print("  已部署: frontend_dist/")
 
     # 清理临时文件
-    ssh_exec(ssh, f"rm -rf {TMP_DIR}")
+    ssh_exec(ssh, f"rm -rf {shlex.quote(TMP_DIR)}")
 
     # 安装依赖
     print("检查依赖...")
-    out, err = ssh_exec(ssh, f"cd {REMOTE_BASE} && pip install -r requirements.txt -q 2>&1 | tail -3")
+    out, err = ssh_exec(ssh, f"cd {shlex.quote(REMOTE_BASE)} && pip install -r requirements.txt -q 2>&1 | tail -3")
     if out.strip():
         print(f"  {out.strip()}")
 

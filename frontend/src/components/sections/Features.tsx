@@ -24,12 +24,12 @@ const gradientsDark = [
 ]
 
 const gradientsVintage = [
-  "from-[#4F7942]/20 to-transparent",
-  "from-[#6A9E5C]/18 to-transparent",
-  "from-[#4F7942]/15 to-transparent",
-  "from-[#3B5E32]/15 to-transparent",
-  "from-[#4F7942]/22 to-transparent",
-  "from-[#5B7A4F]/18 to-transparent",
+  "from-accent/20 to-transparent",
+  "from-accent/18 to-transparent",
+  "from-accent/15 to-transparent",
+  "from-accent/15 to-transparent",
+  "from-accent/22 to-transparent",
+  "from-accent/18 to-transparent",
 ]
 
 const techFeatures = [
@@ -71,7 +71,7 @@ export function Features() {
               whileInView={{ scaleX: 1 }}
               viewport={{ once: true }}
               transition={{ delay: 0.4, duration: 0.6 }}
-              className="mt-6 mx-auto w-24 h-0.5 bg-[#4F7942] rounded-full origin-center"
+              className="mt-6 mx-auto w-24 h-0.5 bg-accent rounded-full origin-center"
             />
           )}
         </motion.div>
@@ -91,7 +91,7 @@ export function Features() {
               className={cn(
                 "group relative overflow-hidden rounded-2xl lg:rounded-3xl bg-card border p-6 lg:p-8 transition-all duration-500",
                 feature.span,
-                v ? "border-[#4F7942]/8 hover:border-[#4F7942]/25" : "border-border hover:border-foreground/10"
+                "border-accent/8 hover:border-accent/25"
               )}
             >
               <div className={cn("absolute inset-0 bg-gradient-to-br opacity-0 group-hover:opacity-100 transition-opacity duration-700", gradients[i])} />
@@ -99,9 +99,9 @@ export function Features() {
               <div className="relative z-10">
                 <div className={cn(
                   "w-10 h-10 rounded-xl flex items-center justify-center mb-4",
-                  v ? "bg-[#4F7942]/12" : "bg-muted"
+                  "bg-accent/12"
                 )}>
-                  <feature.icon size={20} className={v ? "text-[#4F7942]" : "text-foreground/70"} />
+                  <feature.icon size={20} className={"text-accent"} />
                 </div>
                 <h3 className="text-[17px] font-semibold tracking-tight text-foreground mb-2">
                   {feature.title}
@@ -123,7 +123,7 @@ export function Features() {
           className="mt-8 flex items-center justify-center gap-6 text-[12px] text-foreground/25 uppercase tracking-wider"
         >
           {techFeatures.map((t) => (
-            <span key={t.label} className={cn("flex items-center gap-2", v && "text-[#4F7942]/40")}>
+            <span key={t.label} className={cn("flex items-center gap-2", v && "text-accent/40")}>
               <t.icon size={13} />
               {t.label}
             </span>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { motion } from "framer-motion"
 import { PenTool, Sparkles, RefreshCw, Image, ChevronDown, ChevronUp, Send, AlertCircle } from "lucide-react"
 import { marked } from "marked"
@@ -40,11 +40,24 @@ export function CreatorPanel() {
   const [toast, setToast] = useState<string | null>(null)
   const { theme } = useTheme()
   const v = theme === "vintage"
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const toastRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 4000) }
+  const showToast = (msg: string) => {
+    if (toastRef.current) clearTimeout(toastRef.current)
+    setToast(msg)
+    toastRef.current = setTimeout(() => setToast(null), 4000)
+  }
 
   useEffect(() => {
     apiFetch("/topic/industries").then((r) => r.json()).then(setIndustries).catch(() => showToast("行业列表加载失败"))
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current)
+      if (toastRef.current) clearTimeout(toastRef.current)
+    }
   }, [])
 
   const generateTopics = async () => {
@@ -107,12 +120,13 @@ export function CreatorPanel() {
       const genData = await genRes.json()
       if (!genRes.ok || !genData.task_id) { showToast(genData.error || "启动生成失败"); setGenerating(false); return }
       const taskId = genData.task_id
-      const poll = setInterval(async () => {
+      if (pollRef.current) clearInterval(pollRef.current)
+      pollRef.current = setInterval(async () => {
         try {
           const s = await (await apiFetch(`/creator/task/${taskId}/status`)).json()
-          if (s.status === "completed") { clearInterval(poll); const r = await (await apiFetch(`/creator/task/${taskId}/result`)).json(); setArticle(r.article || r.content || ""); setGenerating(false) }
-          else if (s.status === "failed") { clearInterval(poll); showToast("文章生成失败"); setGenerating(false) }
-        } catch { clearInterval(poll); showToast("任务状态查询失败"); setGenerating(false) }
+          if (s.status === "completed") { clearInterval(pollRef.current!); pollRef.current = null; const r = await (await apiFetch(`/creator/task/${taskId}/result`)).json(); setArticle(r.article || r.content || ""); setGenerating(false) }
+          else if (s.status === "failed") { clearInterval(pollRef.current!); pollRef.current = null; showToast("文章生成失败"); setGenerating(false) }
+        } catch { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }; showToast("任务状态查询失败"); setGenerating(false) }
       }, 2000)
     } catch { showToast("文章生成失败"); setGenerating(false) }
   }
@@ -136,11 +150,11 @@ export function CreatorPanel() {
               options={[{ value: "", label: "选择行业", disabled: true }, ...industries.map((ind) => ({ value: ind, label: ind }))]}
             />
             <input placeholder="关键词（必填）" value={topicKeyword} onChange={(e) => setTopicKeyword(e.target.value)}
-              className={cn("flex-1 px-4 py-2.5 bg-muted border border-border rounded-xl text-[14px] text-foreground focus:outline-none focus:border-accent/30", v ? "placeholder:text-[#2C2E31]/45" : "placeholder:text-muted-foreground")}
+              className={cn("flex-1 px-4 py-2.5 bg-muted border border-border rounded-xl text-[14px] text-foreground focus:outline-none focus:border-accent/30", v ? "placeholder:text-foreground/45" : "placeholder:text-muted-foreground")}
             />
             <button onClick={generateTopics} disabled={loadingTopics || !industry || !topicKeyword.trim()}
               className={cn("flex items-center gap-2 px-5 py-2.5 rounded-xl text-[13px] font-semibold transition-all disabled:opacity-50",
-                v ? "bg-[#4F7942] text-white hover:bg-[#3B5E32]" : "bg-accent text-accent-foreground hover:bg-accent/90"
+                "bg-accent text-accent-foreground hover:bg-accent/80"
               )}
             ><Sparkles size={14} />{loadingTopics ? "生成中..." : "生成选题"}</button>
           </div>
@@ -196,19 +210,19 @@ export function CreatorPanel() {
                 </div>
                 <div className="flex items-center gap-2">
                   <input placeholder="用自然语言调整框架..." value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && chatFramework()}
-                    className={cn("flex-1 px-3 py-2 bg-muted border border-border rounded-lg text-[13px] text-foreground focus:outline-none", v ? "placeholder:text-[#2C2E31]/45" : "placeholder:text-muted-foreground")} />
+                    className={cn("flex-1 px-3 py-2 bg-muted border border-border rounded-lg text-[13px] text-foreground focus:outline-none", v ? "placeholder:text-foreground/45" : "placeholder:text-muted-foreground")} />
                   <button onClick={chatFramework} className="p-2 bg-muted rounded-lg text-muted-foreground hover:text-foreground"><Send size={14} /></button>
                 </div>
                 <div className="flex items-center gap-4 pt-2">
                   <div className="flex items-center gap-2">
                     <Image size={14} className="text-muted-foreground" /><span className="text-[12px] text-muted-foreground">配图</span>
-                    <select value={imageCount} onChange={(e) => setImageCount(Number(e.target.value))}
-                      className="px-2 py-1 bg-muted border border-border rounded-lg text-[12px] text-muted-foreground appearance-none cursor-pointer"
-                    >{[0,1,2,3,4,5].map((n) => <option key={n} value={n}>{n} 张</option>)}</select>
+                    <Dropdown value={String(imageCount)} onChange={(v) => setImageCount(Number(v))}
+                      options={[0,1,2,3,4,5].map((n) => ({ value: String(n), label: `${n} 张` }))}
+                      minWidth={72} className="text-[12px]" />
                   </div>
                   <button onClick={generateArticle} disabled={generating}
                     className={cn("ml-auto flex items-center gap-2 px-5 py-2 rounded-xl text-[13px] font-semibold transition-all disabled:opacity-50",
-                      v ? "bg-[#4F7942] text-white hover:bg-[#3B5E32]" : "bg-primary text-primary-foreground hover:bg-primary/90"
+                      v ? "bg-accent text-white hover:bg-accent/80" : "bg-primary text-primary-foreground hover:bg-primary/90"
                     )}
                   ><RefreshCw size={14} className={cn(generating && "animate-spin")} />{generating ? "生成中..." : "确认并生成文章"}</button>
                 </div>

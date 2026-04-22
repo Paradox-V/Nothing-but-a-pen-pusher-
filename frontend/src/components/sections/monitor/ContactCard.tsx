@@ -1,8 +1,9 @@
 import { useState } from "react"
 import { Unlink, Plus, Play, Trash2, Clock, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
+
 import type { WcfBinding, MonitorTask, PushLog } from "./types"
-import { SCHEDULE_OPTIONS } from "./types"
+import { formatSchedule } from "./types"
 import { InlineTaskForm } from "./InlineTaskForm"
 
 interface ContactCardProps {
@@ -10,7 +11,6 @@ interface ContactCardProps {
   tasks: MonitorTask[]
   expandedTask: string | null
   logs: PushLog[]
-  v: boolean
   onCreateTask: (name: string, keywords: string[], schedule: string) => void
   onUnbindTask: (taskId: string) => void
   onToggleEnabled: () => void
@@ -21,7 +21,7 @@ interface ContactCardProps {
 }
 
 export function ContactCard({
-  binding, tasks, expandedTask, logs, v,
+  binding, tasks, expandedTask, logs,
   onCreateTask, onUnbindTask, onToggleEnabled,
   onToggleExpandTask, onRunTask, onDeleteTask, runningTaskId,
 }: ContactCardProps) {
@@ -32,7 +32,7 @@ export function ContactCard({
     .filter(Boolean) as MonitorTask[]
 
   return (
-    <div className={cn("p-3 rounded-xl", v ? "bg-[#E8E9E4]/60" : "bg-muted/50")}>
+    <div className={cn("p-3 rounded-xl", "bg-muted/50")}>
       {/* Contact header */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex-1 min-w-0">
@@ -69,7 +69,7 @@ export function ContactCard({
                   <div
                     className={cn("flex items-center gap-2 px-2.5 py-2 rounded-lg cursor-pointer transition-all",
                       expandedTask === task.id
-                        ? v ? "bg-[#4F7942]/10" : "bg-accent/5"
+                        ? "bg-accent/10"
                         : "hover:bg-muted/80"
                     )}
                     onClick={() => onToggleExpandTask(task.id)}
@@ -78,7 +78,7 @@ export function ContactCard({
                       <span className="text-xs font-medium">{task.name}</span>
                       <div className="flex items-center gap-2 mt-0.5 text-[10px] text-foreground/30">
                         <span className="flex items-center gap-0.5"><Clock size={8} />
-                          {SCHEDULE_OPTIONS.find((o) => o.value === task.schedule)?.label || task.schedule}
+                          {formatSchedule(task.schedule)}
                         </span>
                         {task.last_run_at && <span>上次: {task.last_run_at}</span>}
                       </div>
@@ -132,7 +132,6 @@ export function ContactCard({
             <InlineTaskForm
               onSubmit={onCreateTask}
               onCancel={() => setShowForm(false)}
-              v={v}
             />
           ) : (
             <button onClick={() => setShowForm(true)}

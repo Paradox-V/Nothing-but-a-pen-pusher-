@@ -6,6 +6,8 @@ export function useApi<T>(url: string, options?: RequestInit) {
   const [data, setData] = useState<T | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const optionsRef = useRef(options)
+  optionsRef.current = options
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -14,11 +16,11 @@ export function useApi<T>(url: string, options?: RequestInit) {
       const token = localStorage.getItem("_admin_token")
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
-        ...(options?.headers as Record<string, string>),
+        ...(optionsRef.current?.headers as Record<string, string>),
       }
       if (token) headers["Authorization"] = `Bearer ${token}`
 
-      const res = await fetch(`${API_BASE}${url}`, { ...options, headers })
+      const res = await fetch(`${API_BASE}${url}`, { ...optionsRef.current, headers })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const json = await res.json()
       setData(json)

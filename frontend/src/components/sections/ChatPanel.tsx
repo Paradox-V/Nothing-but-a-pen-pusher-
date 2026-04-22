@@ -55,17 +55,17 @@ export function ChatPanel() {
     } catch { setMessages([]) }
   }, [])
 
-  const createSession = async () => {
+  const createSession = async (retryCount = 0) => {
     try {
       const res = await apiFetch("/chat/sessions", {
         method: "POST",
         body: JSON.stringify({ mode: agentMode ? "agent" : "simple" }),
       })
       if (!res.ok) {
-        if (res.status === 401 || res.status === 503) {
+        if ((res.status === 401 || res.status === 503) && retryCount < 1) {
           const data = await res.json().catch(() => ({}))
           const token = prompt(data.error || "请先设置管理密钥")
-          if (token) { localStorage.setItem("_admin_token", token); return createSession() }
+          if (token) { localStorage.setItem("_admin_token", token); return createSession(retryCount + 1) }
         }
         return
       }
@@ -81,7 +81,7 @@ export function ChatPanel() {
     if (activeSession === id) { setActiveSession(null); setMessages([]) }
   }
 
-  const sendMessage = async () => {
+  const sendMessage = async (retryCount = 0) => {
     if (!activeSession || !input.trim() || streaming) return
     const userMsg = input.trim(); setInput("")
     setMessages((prev) => [...prev, { role: "user", content: userMsg }])
@@ -95,10 +95,13 @@ export function ChatPanel() {
         body: JSON.stringify({ message: userMsg }),
       })
       if (!res.ok) {
-        if (res.status === 401 || res.status === 503) {
+        if ((res.status === 401 || res.status === 503) && retryCount < 1) {
           const data = await res.json().catch(() => ({}))
           const token = prompt(data.error || "请先设置管理密钥")
-          if (token) { localStorage.setItem("_admin_token", token); setStreaming(false); return sendMessage() }
+          if (token) { localStorage.setItem("_admin_token", token); setStreaming(false); return sendMessage(retryCount + 1) }
+        } else if (res.status === 401 || res.status === 503) {
+          const data = await res.json().catch(() => ({}))
+          console.error("认证失败，已达到最大重试次数:", data.error || "请检查管理密钥")
         }
         setStreaming(false); return
       }
@@ -152,28 +155,28 @@ export function ChatPanel() {
       {/* Sidebar */}
       <div className="w-64 shrink-0 flex flex-col gap-2">
         {/* Mode Toggle */}
-        <div className={cn("flex rounded-xl border p-0.5", v ? "border-[#4F7942]/20" : "border-border")}>
+        <div className={cn("flex rounded-xl border p-0.5", "border-accent/20")}>
           <button
             onClick={() => setAgentMode(false)}
             className={cn("flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-[12px] font-medium transition-all",
               !agentMode
-                ? v ? "bg-[#4F7942] text-white" : "bg-accent text-accent-foreground"
-                : v ? "text-[#2C2E31]/50 hover:text-[#2C2E31]/70" : "text-foreground/40 hover:text-foreground/60"
+                ? "bg-accent text-accent-foreground"
+                : "text-foreground/40 hover:text-foreground/60"
             )}
           ><MessageSquare size={13} /> 简单问答</button>
           <button
             onClick={() => setAgentMode(true)}
             className={cn("flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-[12px] font-medium transition-all",
               agentMode
-                ? v ? "bg-[#4F7942] text-white" : "bg-accent text-accent-foreground"
-                : v ? "text-[#2C2E31]/50 hover:text-[#2C2E31]/70" : "text-foreground/40 hover:text-foreground/60"
+                ? "bg-accent text-accent-foreground"
+                : "text-foreground/40 hover:text-foreground/60"
             )}
           ><Bot size={13} /> Agent 模式</button>
         </div>
 
         <button onClick={createSession}
           className={cn("flex items-center justify-center gap-2 p-3 rounded-xl border text-[13px] transition-all",
-            v ? "bg-[#4F7942]/10 border-[#4F7942]/20 text-[#4F7942] hover:bg-[#4F7942]/20" : "bg-muted border-border text-foreground/50 hover:text-foreground/70 hover:bg-muted"
+            "bg-accent/10 border-accent/20 text-accent hover:bg-accent/20"
           )}
         ><Plus size={14} /> 新对话</button>
         <div className="flex-1 overflow-auto space-y-1">
@@ -181,14 +184,14 @@ export function ChatPanel() {
             <div key={session.id}
               className={cn("group flex items-center gap-2 px-3 py-2 rounded-xl cursor-pointer transition-all",
                 activeSession === session.id
-                  ? v ? "bg-[#3B5E32] text-white" : "bg-muted text-foreground"
-                  : v ? "text-[#2C2E31]/40 hover:bg-[#3B5E32]/10 hover:text-[#2C2E31]/70" : "text-foreground/40 hover:bg-muted/50 hover:text-foreground/60"
+                  ? "bg-accent text-accent-foreground"
+                  : "text-foreground/40 hover:bg-accent/10 hover:text-foreground/60"
               )}
               onClick={() => loadMessages(session.id)}
             >
               {session.mode === "agent" && (
                 <span className={cn("shrink-0 px-1 py-0.5 rounded text-[9px] font-bold",
-                  v ? "bg-[#4F7942]/20 text-[#4F7942]" : "bg-accent/10 text-accent"
+                  "bg-accent/10 text-accent"
                 )}>Agent</span>
               )}
               <span className="flex-1 text-[13px] truncate">{session.title}</span>
@@ -268,12 +271,12 @@ export function ChatPanel() {
                   disabled={streaming}
                   className={cn(
                     "flex-1 px-4 py-3 bg-muted border border-border rounded-xl text-[14px] text-foreground focus:outline-none focus:border-accent/30 disabled:opacity-50 transition-colors",
-                    v ? "placeholder:text-[#2C2E31]/45" : "placeholder:text-foreground/25"
+                    v ? "placeholder:text-foreground/45" : "placeholder:text-foreground/25"
                   )}
                 />
                 <button onClick={sendMessage} disabled={streaming || !input.trim()}
                   className={cn("p-3 rounded-xl transition-all disabled:opacity-30",
-                    v ? "bg-[#4F7942] text-white hover:bg-[#3B5E32]" : "bg-accent text-accent-foreground hover:bg-accent/90"
+                    "bg-accent text-accent-foreground hover:bg-accent/80"
                   )}
                 ><Send size={16} /></button>
               </div>

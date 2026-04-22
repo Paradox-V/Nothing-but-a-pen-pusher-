@@ -7,11 +7,14 @@ AI 分析器模块
 """
 
 import json
+import logging
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from ai.client import AIClient
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -60,7 +63,7 @@ Return JSON: {{{{ "core_trends": "...", "signals": "...", "outlook": "..." }}}}"
         # 验证配置
         valid, error = self.client.validate_config()
         if not valid:
-            print(f"[AI] 配置警告: {error}")
+            logger.warning("AI 配置警告: %s", error)
 
     def analyze(
         self,
@@ -100,8 +103,8 @@ Return JSON: {{{{ "core_trends": "...", "signals": "...", "outlook": "..." }}}}"
         # 打印分析开始信息
         model = self.client.model or "unknown"
         model_display = model.replace("/", "/\u200b") if model else "unknown"
-        print(f"[AI] 开始分析 {len(items)} 条新闻 (来源: {source_type})")
-        print(f"[AI] 模型: {model_display}")
+        logger.info("开始分析 %d 条新闻 (来源: %s)", len(items), source_type)
+        logger.info("模型: %s", model_display)
 
         try:
             response = self.client.chat(messages)
@@ -121,7 +124,7 @@ Return JSON: {{{{ "core_trends": "...", "signals": "...", "outlook": "..." }}}}"
                 error=str(e),
             )
         except Exception as e:
-            print(f"[AI] 分析失败: {type(e).__name__}: {e}")
+            logger.error("AI 分析失败: %s: %s", type(e).__name__, e)
             return AIAnalysisResult(
                 success=False,
                 error=f"AI 分析调用失败: {type(e).__name__}: {e}",
@@ -170,7 +173,7 @@ Return JSON: {{{{ "core_trends": "...", "signals": "...", "outlook": "..." }}}}"
 
         if not json_str:
             # JSON 提取失败，将原始响应作为 core_trends
-            print("[AI] 无法提取 JSON，使用原始响应作为趋势总结")
+            logger.warning("无法提取 JSON，使用原始响应作为趋势总结")
             return AIAnalysisResult(
                 core_trends=response[:2000] if response else "",
                 raw_response=response,
@@ -180,7 +183,7 @@ Return JSON: {{{{ "core_trends": "...", "signals": "...", "outlook": "..." }}}}"
         try:
             data = json.loads(json_str)
         except json.JSONDecodeError as e:
-            print(f"[AI] JSON 解析错误: {e}")
+            logger.error("JSON 解析错误: %s", e)
             return AIAnalysisResult(
                 success=False,
                 error=f"JSON 解析错误: {e}",
@@ -188,7 +191,7 @@ Return JSON: {{{{ "core_trends": "...", "signals": "...", "outlook": "..." }}}}"
             )
 
         if not isinstance(data, dict):
-            print("[AI] AI 返回的不是 JSON 对象")
+            logger.warning("AI 返回的不是 JSON 对象")
             return AIAnalysisResult(
                 success=False,
                 error="AI 返回格式错误：期望 JSON 对象",
@@ -208,7 +211,7 @@ Return JSON: {{{{ "core_trends": "...", "signals": "...", "outlook": "..." }}}}"
                     core_trends = value
                     break
 
-        print("[AI] 分析完成")
+        logger.info("分析完成")
 
         return AIAnalysisResult(
             core_trends=core_trends or "",

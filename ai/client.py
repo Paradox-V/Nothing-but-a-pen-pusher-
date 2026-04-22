@@ -104,6 +104,8 @@ class AIClient:
         response = completion(**params)
 
         # 提取响应内容
+        if not response.choices:
+            return ""
         # 某些模型/提供商返回 list（内容块）而非 str，统一转为 str
         content = response.choices[0].message.content
         if isinstance(content, list):

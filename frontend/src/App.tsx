@@ -36,7 +36,7 @@ function AppInner() {
     fetch("/api/status")
       .then((r) => r.json())
       .then((d) => setStatus(d))
-      .catch(() => {})
+      .catch((err) => console.error("Status check failed:", err))
   }, [])
 
   const handleTabChange = (tab: string) => {

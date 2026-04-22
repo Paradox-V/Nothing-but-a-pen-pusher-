@@ -21,31 +21,33 @@ class MonitorDB:
 
     def _init_db(self):
         conn = self._get_conn()
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS monitor_tasks (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                keywords TEXT NOT NULL,
-                filters TEXT,
-                schedule TEXT NOT NULL DEFAULT 'daily_morning',
-                push_config TEXT NOT NULL,
-                is_active INTEGER DEFAULT 1,
-                last_run_at TEXT,
-                created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
-                updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
-            );
-            CREATE TABLE IF NOT EXISTS push_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                task_id TEXT NOT NULL,
-                status TEXT NOT NULL,
-                report_summary TEXT,
-                error TEXT,
-                pushed_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
-            );
-            CREATE INDEX IF NOT EXISTS idx_push_logs_task
-                ON push_logs(task_id, pushed_at DESC);
-        """)
-        conn.close()
+        try:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS monitor_tasks (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    keywords TEXT NOT NULL,
+                    filters TEXT,
+                    schedule TEXT NOT NULL DEFAULT 'daily_morning',
+                    push_config TEXT NOT NULL,
+                    is_active INTEGER DEFAULT 1,
+                    last_run_at TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+                );
+                CREATE TABLE IF NOT EXISTS push_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    report_summary TEXT,
+                    error TEXT,
+                    pushed_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+                );
+                CREATE INDEX IF NOT EXISTS idx_push_logs_task
+                    ON push_logs(task_id, pushed_at DESC);
+            """)
+        finally:
+            conn.close()
 
     # ── 内部字段与用户字段 ─────────────────────────────────────
     _INTERNAL_FIELDS = {"last_run_at"}
@@ -58,46 +60,54 @@ class MonitorDB:
                     filters: dict | None, schedule: str,
                     push_config: list) -> dict:
         conn = self._get_conn()
-        conn.execute(
-            "INSERT INTO monitor_tasks (id, name, keywords, filters, schedule, push_config) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (task_id, name, json.dumps(keywords, ensure_ascii=False),
-             json.dumps(filters or {}, ensure_ascii=False),
-             schedule,
-             json.dumps(push_config, ensure_ascii=False)),
-        )
-        conn.commit()
-        # 查询后再关闭连接
-        row = conn.execute("SELECT * FROM monitor_tasks WHERE id = ?", (task_id,)).fetchone()
-        conn.close()
-        return self._sanitize_row(dict(row)) if row else {"id": task_id, "name": name}
+        try:
+            conn.execute(
+                "INSERT INTO monitor_tasks (id, name, keywords, filters, schedule, push_config) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (task_id, name, json.dumps(keywords, ensure_ascii=False),
+                 json.dumps(filters or {}, ensure_ascii=False),
+                 schedule,
+                 json.dumps(push_config, ensure_ascii=False)),
+            )
+            conn.commit()
+            # 查询后再关闭连接
+            row = conn.execute("SELECT * FROM monitor_tasks WHERE id = ?", (task_id,)).fetchone()
+            return self._sanitize_row(dict(row)) if row else {"id": task_id, "name": name}
+        finally:
+            conn.close()
 
     def get_tasks(self) -> list[dict]:
         conn = self._get_conn()
-        rows = conn.execute(
-            "SELECT id, name, keywords, filters, schedule, push_config, "
-            "  is_active, last_run_at, created_at, updated_at "
-            "FROM monitor_tasks ORDER BY updated_at DESC"
-        ).fetchall()
-        conn.close()
-        return [self._sanitize_row(dict(r)) for r in rows]
+        try:
+            rows = conn.execute(
+                "SELECT id, name, keywords, filters, schedule, push_config, "
+                "  is_active, last_run_at, created_at, updated_at "
+                "FROM monitor_tasks ORDER BY updated_at DESC"
+            ).fetchall()
+            return [self._sanitize_row(dict(r)) for r in rows]
+        finally:
+            conn.close()
 
     def get_task(self, task_id: str) -> dict | None:
         conn = self._get_conn()
-        row = conn.execute(
-            "SELECT * FROM monitor_tasks WHERE id = ?", (task_id,)
-        ).fetchone()
-        conn.close()
-        return self._sanitize_row(dict(row)) if row else None
+        try:
+            row = conn.execute(
+                "SELECT * FROM monitor_tasks WHERE id = ?", (task_id,)
+            ).fetchone()
+            return self._sanitize_row(dict(row)) if row else None
+        finally:
+            conn.close()
 
     def get_task_raw(self, task_id: str) -> dict | None:
         """获取未脱敏的原始任务数据（内部使用）。"""
         conn = self._get_conn()
-        row = conn.execute(
-            "SELECT * FROM monitor_tasks WHERE id = ?", (task_id,)
-        ).fetchone()
-        conn.close()
-        return dict(row) if row else None
+        try:
+            row = conn.execute(
+                "SELECT * FROM monitor_tasks WHERE id = ?", (task_id,)
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
 
     def update_task(self, task_id: str, **kwargs) -> dict | None:
         updates = {k: v for k, v in kwargs.items() if k in self._ALL_MUTABLE}
@@ -114,54 +124,64 @@ class MonitorDB:
         set_clause = ", ".join(f"{k} = ?" for k in updates)
         values = list(updates.values()) + [task_id]
         conn = self._get_conn()
-        conn.execute(
-            f"UPDATE monitor_tasks SET {set_clause}, "
-            "updated_at = datetime('now','localtime') WHERE id = ?",
-            values,
-        )
-        conn.commit()
-        conn.close()
+        try:
+            conn.execute(
+                f"UPDATE monitor_tasks SET {set_clause}, "
+                "updated_at = datetime('now','localtime') WHERE id = ?",
+                values,
+            )
+            conn.commit()
+        finally:
+            conn.close()
         return self.get_task(task_id)
 
     def delete_task(self, task_id: str) -> bool:
         conn = self._get_conn()
-        conn.execute("DELETE FROM push_logs WHERE task_id = ?", (task_id,))
-        cursor = conn.execute("DELETE FROM monitor_tasks WHERE id = ?", (task_id,))
-        conn.commit()
-        conn.close()
-        return cursor.rowcount > 0
+        try:
+            conn.execute("DELETE FROM push_logs WHERE task_id = ?", (task_id,))
+            cursor = conn.execute("DELETE FROM monitor_tasks WHERE id = ?", (task_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
 
     def get_active_tasks(self) -> list[dict]:
         """获取所有活跃任务（未脱敏，内部使用）。"""
         conn = self._get_conn()
-        rows = conn.execute(
-            "SELECT * FROM monitor_tasks WHERE is_active = 1"
-        ).fetchall()
-        conn.close()
-        return [dict(r) for r in rows]
+        try:
+            rows = conn.execute(
+                "SELECT * FROM monitor_tasks WHERE is_active = 1"
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
 
     # ── 推送日志 ─────────────────────────────────────────────
 
     def log_push(self, task_id: str, status: str, report_summary: str = "",
                  error: str = ""):
         conn = self._get_conn()
-        conn.execute(
-            "INSERT INTO push_logs (task_id, status, report_summary, error) "
-            "VALUES (?, ?, ?, ?)",
-            (task_id, status, report_summary[:500], error),
-        )
-        conn.commit()
-        conn.close()
+        try:
+            conn.execute(
+                "INSERT INTO push_logs (task_id, status, report_summary, error) "
+                "VALUES (?, ?, ?, ?)",
+                (task_id, status, report_summary[:500], error),
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
     def get_push_logs(self, task_id: str, limit: int = 20) -> list[dict]:
         conn = self._get_conn()
-        rows = conn.execute(
-            "SELECT id, task_id, status, report_summary, error, pushed_at "
-            "FROM push_logs WHERE task_id = ? ORDER BY pushed_at DESC LIMIT ?",
-            (task_id, limit),
-        ).fetchall()
-        conn.close()
-        return [dict(r) for r in rows]
+        try:
+            rows = conn.execute(
+                "SELECT id, task_id, status, report_summary, error, pushed_at "
+                "FROM push_logs WHERE task_id = ? ORDER BY pushed_at DESC LIMIT ?",
+                (task_id, limit),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
 
     # ── 脱敏 ─────────────────────────────────────────────────
 

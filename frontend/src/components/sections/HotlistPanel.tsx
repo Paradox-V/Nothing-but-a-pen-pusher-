@@ -31,7 +31,7 @@ interface PlatformStat {
 type FetchState = "idle" | "fetching" | "success" | "failed"
 
 const RANK_COLORS_DARK = ["text-[#ff375f]", "text-[#ff9f0a]", "text-[#30d158]"]
-const RANK_COLORS_VINTAGE = ["text-[#A84860]", "text-[#B8862D]", "text-[#4F7942]"]
+const RANK_COLORS_VINTAGE = ["text-[#A84860]", "text-[#B8862D]", "text-accent"]
 
 // 平台ID -> 中文名 的后备映射
 const PLATFORM_FALLBACK: Record<string, string> = {
@@ -174,7 +174,7 @@ export function HotlistPanel() {
             )}
             <button onClick={handleRefresh} disabled={fetchState === "fetching"}
               className={cn("p-2.5 rounded-xl border transition-all disabled:opacity-50",
-                theme === "vintage" ? "bg-[#3B5E32] border-[#3B5E32] text-white hover:bg-[#324F2B]" : "bg-muted border-border text-muted-foreground hover:text-foreground"
+                "bg-muted border-border text-muted-foreground hover:text-foreground"
               )}
             ><RefreshCw size={16} className={cn(fetchState === "fetching" && "animate-spin")} /></button>
           </div>

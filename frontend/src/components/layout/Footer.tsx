@@ -1,14 +1,10 @@
 import { ExternalLink } from "lucide-react"
-import { useTheme } from "@/hooks/use-theme"
 
 export function Footer() {
-  const { theme } = useTheme()
-  const v = theme === "vintage"
-
   return (
-    <footer className={v ? "py-12 px-6 border-t border-[#4F7942]/15" : "py-12 px-6 border-t border-border"}>
+    <footer className="py-12 px-6 border-t border-border">
       <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
-        <p className={v ? "text-[13px] text-[#4F7942]/50" : "text-[13px] text-muted-foreground"}>
+        <p className="text-[13px] text-muted-foreground">
           信源汇总 · AI 驱动的智能信息中枢
         </p>
         <div className="flex items-center gap-4">

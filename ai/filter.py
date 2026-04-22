@@ -7,11 +7,14 @@ AI 智能筛选模块
 """
 
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
 from ai.client import AIClient
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -63,7 +66,7 @@ Return JSON: [{{"id": 0, "tag": "tag_name", "score": 0.8}}, ...]"""
         # 验证配置
         valid, error = self.client.validate_config()
         if not valid:
-            print(f"[AI筛选] 配置警告: {error}")
+            logger.warning("AI筛选配置警告: %s", error)
 
     def classify_batch(
         self,
@@ -127,7 +130,7 @@ Return JSON: [{{"id": 0, "tag": "tag_name", "score": 0.8}}, ...]"""
             {"role": "user", "content": user_prompt},
         ]
 
-        print(f"[AI筛选] 开始分类 {len(items)} 条新闻，使用 {len(tags)} 个标签")
+        logger.info("开始分类 %d 条新闻，使用 %d 个标签", len(items), len(tags))
 
         try:
             response = self.client.chat(messages)
@@ -152,7 +155,7 @@ Return JSON: [{{"id": 0, "tag": "tag_name", "score": 0.8}}, ...]"""
                 error=str(e),
             )
         except Exception as e:
-            print(f"[AI筛选] 分类失败: {type(e).__name__}: {e}")
+            logger.error("AI筛选分类失败: %s: %s", type(e).__name__, e)
             return AIFilterResult(
                 total_processed=len(items),
                 success=False,
@@ -172,17 +175,17 @@ Return JSON: [{{"id": 0, "tag": "tag_name", "score": 0.8}}, ...]"""
         # 尝试提取 JSON
         json_str = self._extract_json(response)
         if not json_str:
-            print("[AI筛选] 无法从响应中提取 JSON")
+            logger.warning("无法从AI筛选响应中提取 JSON")
             return None
 
         try:
             data = json.loads(json_str)
         except json.JSONDecodeError as e:
-            print(f"[AI筛选] JSON 解析错误: {e}")
+            logger.error("AI筛选 JSON 解析错误: %s", e)
             return None
 
         if not isinstance(data, list):
-            print("[AI筛选] AI 返回的不是数组")
+            logger.warning("AI筛选返回的不是数组")
             return None
 
         # 验证每条结果
@@ -199,7 +202,7 @@ Return JSON: [{{"id": 0, "tag": "tag_name", "score": 0.8}}, ...]"""
                 continue
             valid.append(item)
 
-        print(f"[AI筛选] 解析到 {len(valid)} 条有效分类结果")
+        logger.info("解析到 %d 条有效分类结果", len(valid))
         return valid
 
     def _build_result(
@@ -259,7 +262,7 @@ Return JSON: [{{"id": 0, "tag": "tag_name", "score": 0.8}}, ...]"""
             })
             total_matched += len(matched_items)
 
-        print(f"[AI筛选] 分类完成: {len(result_tags)} 个标签命中，共 {total_matched} 条新闻")
+        logger.info("分类完成: %d 个标签命中，共 %d 条新闻", len(result_tags), total_matched)
 
         return AIFilterResult(
             tags=result_tags,

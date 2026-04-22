@@ -23,6 +23,7 @@ def _get_agent_service():
 
 
 @chat_bp.route("/sessions", methods=["GET"])
+@require_auth
 def get_sessions():
     """获取会话列表"""
     mode = request.args.get("mode")
@@ -53,6 +54,7 @@ def delete_session(session_id):
 
 
 @chat_bp.route("/sessions/<session_id>/messages", methods=["GET"])
+@require_auth
 def get_messages(session_id):
     """获取会话历史消息"""
     session = _chat_service.db.get_session(session_id)

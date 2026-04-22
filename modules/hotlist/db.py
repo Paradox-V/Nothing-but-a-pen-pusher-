@@ -22,41 +22,43 @@ class HotlistDB:
 
     def _init_db(self):
         conn = self._get_conn()
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS crawl_batches (
-                id INTEGER PRIMARY KEY,
-                crawl_time DATETIME NOT NULL,
-                platform_count INTEGER,
-                item_count INTEGER
-            );
-        """)
+        try:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS crawl_batches (
+                    id INTEGER PRIMARY KEY,
+                    crawl_time DATETIME NOT NULL,
+                    platform_count INTEGER,
+                    item_count INTEGER
+                );
+            """)
 
-        # 检测是否需要从旧 schema 迁移（UNIQUE(url, platform, crawl_time) → UNIQUE(title, platform)）
-        table_def = conn.execute(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name='hot_items'"
-        ).fetchone()
-        if table_def and "url, platform, crawl_time" in table_def["sql"]:
-            self._migrate_from_v1(conn)
+            # 检测是否需要从旧 schema 迁移（UNIQUE(url, platform, crawl_time) → UNIQUE(title, platform)）
+            table_def = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='hot_items'"
+            ).fetchone()
+            if table_def and "url, platform, crawl_time" in table_def["sql"]:
+                self._migrate_from_v1(conn)
 
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS hot_items (
-                id INTEGER PRIMARY KEY,
-                title TEXT NOT NULL,
-                url TEXT,
-                platform TEXT NOT NULL,
-                platform_name TEXT,
-                hot_rank INTEGER,
-                hot_score TEXT,
-                crawl_time DATETIME NOT NULL,
-                first_time DATETIME,
-                last_time DATETIME,
-                appear_count INTEGER DEFAULT 1,
-                UNIQUE(title, platform)
-            );
-            CREATE INDEX IF NOT EXISTS idx_hot_platform ON hot_items(platform);
-            CREATE INDEX IF NOT EXISTS idx_hot_crawl_time ON hot_items(crawl_time);
-        """)
-        conn.close()
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS hot_items (
+                    id INTEGER PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    url TEXT,
+                    platform TEXT NOT NULL,
+                    platform_name TEXT,
+                    hot_rank INTEGER,
+                    hot_score TEXT,
+                    crawl_time DATETIME NOT NULL,
+                    first_time DATETIME,
+                    last_time DATETIME,
+                    appear_count INTEGER DEFAULT 1,
+                    UNIQUE(title, platform)
+                );
+                CREATE INDEX IF NOT EXISTS idx_hot_platform ON hot_items(platform);
+                CREATE INDEX IF NOT EXISTS idx_hot_crawl_time ON hot_items(crawl_time);
+            """)
+        finally:
+            conn.close()
 
     def _migrate_from_v1(self, conn):
         """合并旧表中同一 (title, platform) 的多行为一行"""
@@ -253,62 +255,67 @@ class HotlistDB:
         offset = (page - 1) * page_size
 
         conn = self._get_conn()
+        try:
+            where_parts = ["crawl_time >= ?"]
+            params = [cutoff]
+            if platform:
+                where_parts.append("platform = ?")
+                params.append(platform)
+            where_clause = " AND ".join(where_parts)
 
-        where_parts = ["crawl_time >= ?"]
-        params = [cutoff]
-        if platform:
-            where_parts.append("platform = ?")
-            params.append(platform)
-        where_clause = " AND ".join(where_parts)
+            total = conn.execute(
+                f"SELECT COUNT(*) FROM hot_items WHERE {where_clause}", params
+            ).fetchone()[0]
 
-        total = conn.execute(
-            f"SELECT COUNT(*) FROM hot_items WHERE {where_clause}", params
-        ).fetchone()[0]
+            rows = conn.execute(
+                f"""
+                SELECT * FROM hot_items
+                WHERE {where_clause}
+                ORDER BY platform, hot_rank ASC
+                LIMIT ? OFFSET ?
+                """,
+                params + [page_size, offset],
+            ).fetchall()
 
-        rows = conn.execute(
-            f"""
-            SELECT * FROM hot_items
-            WHERE {where_clause}
-            ORDER BY platform, hot_rank ASC
-            LIMIT ? OFFSET ?
-            """,
-            params + [page_size, offset],
-        ).fetchall()
-
-        conn.close()
-        return {
-            "items": [dict(r) for r in rows],
-            "total": total,
-            "page": page,
-            "page_size": page_size,
-        }
+            return {
+                "items": [dict(r) for r in rows],
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+            }
+        finally:
+            conn.close()
 
     def get_platform_stats(self):
         """每个平台的统计信息"""
         conn = self._get_conn()
-        rows = conn.execute(
-            """
-            SELECT
-                platform,
-                platform_name,
-                COUNT(*) AS item_count,
-                MAX(crawl_time) AS latest_crawl_time
-            FROM hot_items
-            GROUP BY platform
-            ORDER BY latest_crawl_time DESC
-            """
-        ).fetchall()
-        conn.close()
-        return [dict(r) for r in rows]
+        try:
+            rows = conn.execute(
+                """
+                SELECT
+                    platform,
+                    platform_name,
+                    COUNT(*) AS item_count,
+                    MAX(crawl_time) AS latest_crawl_time
+                FROM hot_items
+                GROUP BY platform
+                ORDER BY latest_crawl_time DESC
+                """
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
 
     def get_last_crawl_time(self):
         """最近一次抓取时间"""
         conn = self._get_conn()
-        row = conn.execute(
-            "SELECT crawl_time FROM crawl_batches ORDER BY crawl_time DESC LIMIT 1"
-        ).fetchone()
-        conn.close()
-        return row["crawl_time"] if row else None
+        try:
+            row = conn.execute(
+                "SELECT crawl_time FROM crawl_batches ORDER BY crawl_time DESC LIMIT 1"
+            ).fetchone()
+            return row["crawl_time"] if row else None
+        finally:
+            conn.close()
 
     # ------------------------------------------------------------------
     #  Maintenance
@@ -320,13 +327,15 @@ class HotlistDB:
             "%Y-%m-%d %H:%M:%S"
         )
         conn = self._get_conn()
-        cur = conn.execute(
-            "DELETE FROM hot_items WHERE crawl_time < ?", (cutoff,)
-        )
-        deleted = cur.rowcount
-        conn.commit()
-        conn.close()
-        return deleted
+        try:
+            cur = conn.execute(
+                "DELETE FROM hot_items WHERE crawl_time < ?", (cutoff,)
+            )
+            deleted = cur.rowcount
+            conn.commit()
+            return deleted
+        finally:
+            conn.close()
 
     # ── 归档辅助 ────────────────────────────────────────────
 

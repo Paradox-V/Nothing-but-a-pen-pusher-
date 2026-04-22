@@ -1,17 +1,18 @@
 import { useState } from "react"
 import { cn } from "@/lib/utils"
-import { SCHEDULE_OPTIONS } from "./types"
+
+import { Dropdown } from "@/components/shared/Dropdown"
+import { SCHEDULE_DEFAULTS } from "./types"
 
 interface InlineTaskFormProps {
   onSubmit: (name: string, keywords: string[], schedule: string) => void
   onCancel: () => void
-  v: boolean
 }
 
-export function InlineTaskForm({ onSubmit, onCancel, v }: InlineTaskFormProps) {
+export function InlineTaskForm({ onSubmit, onCancel }: InlineTaskFormProps) {
   const [name, setName] = useState("")
   const [keywords, setKeywords] = useState("")
-  const [schedule, setSchedule] = useState("daily_morning")
+  const [schedule, setSchedule] = useState("08:00")
 
   const handleSubmit = () => {
     if (!name || !keywords) return
@@ -24,7 +25,7 @@ export function InlineTaskForm({ onSubmit, onCancel, v }: InlineTaskFormProps) {
 
   return (
     <div className={cn("mt-2 p-3 rounded-xl border space-y-2",
-      v ? "bg-[#E8E9E4]/60 border-[#4F7942]/10" : "bg-muted/30 border-border"
+      "bg-muted/30 border-accent/10"
     )}>
       <div className="grid grid-cols-2 gap-2">
         <div>
@@ -35,10 +36,8 @@ export function InlineTaskForm({ onSubmit, onCancel, v }: InlineTaskFormProps) {
         </div>
         <div>
           <label className="text-[10px] text-foreground/40 mb-0.5 block">推送时间</label>
-          <select value={schedule} onChange={(e) => setSchedule(e.target.value)}
-            className="w-full px-2.5 py-1.5 bg-muted border border-border rounded-lg text-xs text-foreground focus:outline-none">
-            {SCHEDULE_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-          </select>
+          <Dropdown value={schedule} onChange={setSchedule}
+            options={SCHEDULE_DEFAULTS.map(t => ({ value: t, label: t }))} className="text-xs" />
         </div>
       </div>
       <div>
@@ -50,7 +49,7 @@ export function InlineTaskForm({ onSubmit, onCancel, v }: InlineTaskFormProps) {
       <div className="flex items-center gap-2">
         <button onClick={handleSubmit}
           className={cn("px-3 py-1.5 rounded-lg text-xs font-medium",
-            v ? "bg-[#4F7942] text-white hover:bg-[#3B5E32]" : "bg-accent text-accent-foreground hover:bg-accent/90"
+            "bg-accent text-accent-foreground hover:bg-accent/80"
           )}>创建</button>
         <button onClick={onCancel}
           className="px-3 py-1.5 rounded-lg text-xs text-foreground/40 hover:text-foreground/60">取消</button>

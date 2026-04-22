@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Search, RefreshCw, Rss, ExternalLink, Plus, Settings2, X, Compass, Code, Edit3, Check, AlertCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -6,7 +6,7 @@ import { Loading } from "@/components/shared/Loading"
 import { Dropdown } from "@/components/shared/Dropdown"
 import { Empty } from "@/components/shared/Empty"
 import { AnimateIn } from "@/components/shared/AnimateIn"
-import { useTheme } from "@/hooks/use-theme"
+
 import { apiFetch } from "@/hooks/use-api"
 
 interface RssItem { id: number; title: string; summary: string; url: string; feed_name: string; published_at: string }
@@ -23,8 +23,6 @@ export function RssPanel() {
   const [newFeedName, setNewFeedName] = useState("")
   const [newFeedUrl, setNewFeedUrl] = useState("")
   const [toast, setToast] = useState<string | null>(null)
-  const { theme } = useTheme()
-  const v = theme === "vintage"
   const perPage = 20
 
   // 发现功能
@@ -45,8 +43,17 @@ export function RssPanel() {
   const [editingFeed, setEditingFeed] = useState<Feed | null>(null)
   const [editName, setEditName] = useState("")
   const [editUrl, setEditUrl] = useState("")
+  const toastRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000) }
+  const showToast = (msg: string) => {
+    if (toastRef.current) clearTimeout(toastRef.current)
+    setToast(msg)
+    toastRef.current = setTimeout(() => setToast(null), 3000)
+  }
+
+  useEffect(() => {
+    return () => { if (toastRef.current) clearTimeout(toastRef.current) }
+  }, [])
 
   const fetchRss = useCallback(async () => {
     setLoading(true)
@@ -164,12 +171,12 @@ export function RssPanel() {
           />
           <button onClick={() => setShowDiscover(true)}
             className={cn("p-2.5 rounded-xl border transition-all",
-              v ? "bg-[#3B5E32] border-[#3B5E32] text-white hover:bg-[#324F2B]" : "bg-muted border-border text-muted-foreground hover:text-foreground"
+              "bg-muted border-border text-muted-foreground hover:text-foreground"
             )}
           ><Compass size={16} /></button>
           <button onClick={() => setShowManager(!showManager)}
             className={cn("p-2.5 rounded-xl border transition-all",
-              v ? "bg-[#3B5E32] border-[#3B5E32] text-white hover:bg-[#324F2B]" : showManager ? "bg-muted border-border" : "bg-muted border-border text-muted-foreground hover:text-foreground"
+              showManager ? "bg-muted border-border" : "bg-muted border-border text-muted-foreground hover:text-foreground"
             )}
           ><Settings2 size={16} /></button>
           <button onClick={async () => {
@@ -177,7 +184,7 @@ export function RssPanel() {
             fetchRss()
           }}
             className={cn("p-2.5 rounded-xl border transition-all",
-              v ? "bg-[#3B5E32] border-[#3B5E32] text-white hover:bg-[#324F2B]" : "bg-muted border-border text-muted-foreground hover:text-foreground"
+              "bg-muted border-border text-muted-foreground hover:text-foreground"
             )}
           ><RefreshCw size={16} /></button>
         </div>
@@ -201,7 +208,7 @@ export function RssPanel() {
                 <input placeholder="输入网站地址，如 https://36kr.com" value={discoverUrl} onChange={(e) => setDiscoverUrl(e.target.value)}
                   className="flex-1 px-3 py-2 bg-muted border border-border rounded-lg text-[13px] text-foreground placeholder:text-foreground/25 focus:outline-none" />
                 <button onClick={discoverFeed} disabled={discoverLoading}
-                  className={cn("px-4 py-2 rounded-lg text-[13px] font-medium disabled:opacity-50", v ? "bg-[#4F7942] text-white" : "bg-accent text-accent-foreground")}>发现</button>
+                  className={cn("px-4 py-2 rounded-lg text-[13px] font-medium disabled:opacity-50", "bg-accent text-accent-foreground")}>发现</button>
               </div>
               {discoverResults.length > 0 && (
                 <div className="space-y-2">
@@ -232,7 +239,7 @@ export function RssPanel() {
                     <input placeholder="标题选择器（可选）" value={customTitleSelector} onChange={(e) => setCustomTitleSelector(e.target.value)}
                       className="w-full px-3 py-2 bg-muted border border-border rounded-lg text-[13px] text-foreground placeholder:text-foreground/25 focus:outline-none" />
                     <button onClick={customDiscoverFeed} disabled={customLoading}
-                      className={cn("w-full py-2 rounded-lg text-[13px] font-medium disabled:opacity-50", v ? "bg-[#4F7942] text-white" : "bg-accent text-accent-foreground")}>
+                      className={cn("w-full py-2 rounded-lg text-[13px] font-medium disabled:opacity-50", "bg-accent text-accent-foreground")}>
                       {customLoading ? "生成中..." : "生成 RSS 源"}
                     </button>
                     {customResult && <p className="text-[12px] text-accent break-all">{customResult}</p>}
@@ -264,7 +271,7 @@ export function RssPanel() {
                 <input placeholder="URL" value={newFeedUrl} onChange={(e) => setNewFeedUrl(e.target.value)}
                   className="flex-[2] px-3 py-2 bg-muted border border-border rounded-lg text-[13px] text-foreground placeholder:text-foreground/25 focus:outline-none" />
                 <button onClick={addFeed}
-                  className={cn("p-2 rounded-lg", v ? "bg-[#4F7942] text-white" : "bg-accent text-accent-foreground")}
+                  className={cn("p-2 rounded-lg", "bg-accent text-accent-foreground")}
                 ><Plus size={16} /></button>
               </div>
               <div className="space-y-2">
@@ -299,7 +306,7 @@ export function RssPanel() {
                         <button onClick={() => { setEditingFeed(feed); setEditName(feed.name); setEditUrl(feed.url) }}
                           className="p-1 text-muted-foreground/50 hover:text-foreground"><Edit3 size={13} /></button>
                         <button onClick={() => toggleFeed(feed)}
-                          className={cn("w-8 h-5 rounded-full transition-all relative", feed.enabled ? (v ? "bg-[#4F7942]" : "bg-accent") : "bg-muted")}
+                          className={cn("w-8 h-5 rounded-full transition-all relative", feed.enabled ? "bg-accent" : "bg-muted")}
                         >
                           <span className={cn("absolute top-0.5 w-4 h-4 rounded-full bg-background transition-all", feed.enabled ? "left-[18px]" : "left-0.5")} />
                         </button>

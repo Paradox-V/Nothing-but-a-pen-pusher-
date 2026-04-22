@@ -57,6 +57,7 @@ def api_framework_create():
 
 
 @creator_bp.route("/api/creator/framework/<fw_id>")
+@require_auth
 def api_framework_get(fw_id: str):
     """获取框架详情"""
     fw = get_framework(fw_id)
@@ -150,6 +151,7 @@ def api_article_generate(fw_id: str):
 
 
 @creator_bp.route("/api/creator/task/<task_id>/status")
+@require_auth
 def api_task_status(task_id: str):
     """轮询任务状态"""
     task = get_task_status(task_id)
@@ -159,6 +161,7 @@ def api_task_status(task_id: str):
 
 
 @creator_bp.route("/api/creator/task/<task_id>/result")
+@require_auth
 def api_task_result(task_id: str):
     """获取任务结果（含完整文章和图片）"""
     task = get_task_status(task_id)

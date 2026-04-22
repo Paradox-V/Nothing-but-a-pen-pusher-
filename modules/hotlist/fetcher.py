@@ -10,11 +10,14 @@
 """
 
 import json
+import logging
 import random
 import time
 from typing import Dict, List, Tuple, Optional, Union
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 # 平台 ID -> 中文名称映射
 PLATFORM_NAMES: Dict[str, str] = {
@@ -112,7 +115,7 @@ class DataFetcher:
                     raise ValueError(f"响应状态异常: {status}")
 
                 status_info = "最新数据" if status == "success" else "缓存数据"
-                print(f"获取 {id_value} 成功（{status_info}）")
+                logger.info("获取 %s 成功（%s）", id_value, status_info)
                 return data_text, id_value, alias
 
             except Exception as e:
@@ -121,10 +124,10 @@ class DataFetcher:
                     base_wait = random.uniform(min_retry_wait, max_retry_wait)
                     additional_wait = (retries - 1) * random.uniform(1, 2)
                     wait_time = base_wait + additional_wait
-                    print(f"请求 {id_value} 失败: {e}. {wait_time:.2f}秒后重试...")
+                    logger.warning("请求 %s 失败: %s. %.2f秒后重试...", id_value, e, wait_time)
                     time.sleep(wait_time)
                 else:
-                    print(f"请求 {id_value} 失败: {e}")
+                    logger.error("请求 %s 失败: %s", id_value, e)
                     return None, id_value, alias
 
         return None, id_value, alias
@@ -181,10 +184,10 @@ class DataFetcher:
                                 "mobileUrl": mobile_url,
                             }
                 except json.JSONDecodeError:
-                    print(f"解析 {id_value} 响应失败")
+                    logger.error("解析 %s 响应失败", id_value)
                     failed_ids.append(id_value)
                 except Exception as e:
-                    print(f"处理 {id_value} 数据出错: {e}")
+                    logger.error("处理 %s 数据出错: %s", id_value, e)
                     failed_ids.append(id_value)
             else:
                 failed_ids.append(id_value)
@@ -195,7 +198,7 @@ class DataFetcher:
                 actual_interval = max(50, actual_interval)
                 time.sleep(actual_interval / 1000)
 
-        print(f"成功: {list(results.keys())}, 失败: {failed_ids}")
+        logger.info("成功: %s, 失败: %s", list(results.keys()), failed_ids)
         return results, id_to_name, failed_ids
 
     # ------------------------------------------------------------------

@@ -125,7 +125,7 @@ def _send_feishu(content: str, channel: dict) -> tuple[bool, str]:
     resp = httpx.post(url, json=payload, timeout=10)
     if resp.status_code == 200:
         data = resp.json()
-        if data.get("code") in (0, None) and data.get("msg") == "success" or data.get("StatusCode") == 0:
+        if (data.get("code") in (0, None) and data.get("msg") == "success") or data.get("StatusCode") == 0:
             return True, ""
         return False, data.get("msg", str(data))
     return False, f"HTTP {resp.status_code}"

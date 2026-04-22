@@ -9,6 +9,7 @@
   - 未配置 ADMIN_TOKEN 时拒绝所有写请求
 """
 import os
+import secrets
 import logging
 from functools import wraps
 
@@ -48,7 +49,7 @@ def require_auth(f):
         else:
             client_token = None
 
-        if not client_token or client_token != token:
+        if not client_token or not secrets.compare_digest(client_token, token):
             logger.warning("鉴权失败: %s %s (来源: %s)",
                            request.method, request.path, request.remote_addr)
             return jsonify({"error": "未授权访问，请提供有效的 Token"}), 401

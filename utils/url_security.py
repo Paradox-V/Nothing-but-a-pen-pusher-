@@ -92,6 +92,8 @@ def validate_url(url: str) -> tuple[bool, str]:
     blocked_hostnames = {
         "localhost", "localhost.localdomain",
         "ip6-localhost", "ip6-loopback",
+        "host.docker.internal",
+        "metadata.google.internal",
     }
     if hostname_lower in blocked_hostnames:
         return False, f"不允许访问: {hostname}"

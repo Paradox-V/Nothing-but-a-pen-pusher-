@@ -5,12 +5,13 @@ Web 进程通过此模块与 scheduler 5001 端口通信。
 """
 
 import logging
+import os
 
 import httpx
 
 logger = logging.getLogger(__name__)
 
-SCHEDULER_URL = "http://127.0.0.1:5001"
+SCHEDULER_URL = os.environ.get("SCHEDULER_URL", "http://127.0.0.1:5001")
 DEFAULT_TIMEOUT = 15
 
 
