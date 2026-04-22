@@ -96,6 +96,15 @@ def add_feed():
     if "max_age_days" in data and data["max_age_days"] is not None:
         kwargs["max_age_days"] = int(data["max_age_days"])
 
+    # 从用户 JWT 获取 owner_id（若有）
+    try:
+        from flask import g
+        owner_id = getattr(g, "current_user_id", None)
+        if owner_id:
+            kwargs["owner_id"] = owner_id
+    except Exception:
+        pass
+
     db = _get_db()
     try:
         feed_id = db.add_feed(name, url, **kwargs)

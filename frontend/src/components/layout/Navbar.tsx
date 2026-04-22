@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Menu, X, Settings, Sun, Moon } from "lucide-react"
+import { Menu, X, Settings, Sun, Moon, User, ShieldCheck } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useTheme } from "@/hooks/use-theme"
+import { useAuth } from "@/hooks/use-auth"
 
 const navLinks = [
   { label: "新闻", tab: "news" },
@@ -22,6 +23,7 @@ export function Navbar({ activeTab, onTabChange }: NavbarProps) {
   const [scrolled, setScrolled] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const { theme, toggle } = useTheme()
+  const { user, isAuthenticated } = useAuth()
 
   useEffect(() => {
     const handler = () => setScrolled(window.scrollY > 20)
@@ -30,6 +32,14 @@ export function Navbar({ activeTab, onTabChange }: NavbarProps) {
   }, [])
 
   const isVintage = theme === "vintage"
+
+  const handleAdminClick = () => {
+    const token = prompt("设置管理密钥")
+    if (token !== null) {
+      localStorage.setItem("_admin_token", token)
+      if (token) onTabChange("admin")
+    }
+  }
 
   return (
     <>
@@ -85,15 +95,45 @@ export function Navbar({ activeTab, onTabChange }: NavbarProps) {
             >
               {isVintage ? <Moon size={16} /> : <Sun size={16} />}
             </button>
+
+            {/* 账号按钮 */}
             <button
-              onClick={() => {
-                const token = prompt("设置管理密钥")
-                if (token !== null) localStorage.setItem("_admin_token", token)
-              }}
-              className="p-2 rounded-full text-foreground/40 hover:text-foreground/70 hover:bg-muted transition-all"
+              onClick={() => onTabChange("account")}
+              className={cn(
+                "p-2 rounded-full transition-all",
+                activeTab === "account"
+                  ? isVintage ? "text-accent bg-accent/10" : "text-foreground bg-muted"
+                  : "text-foreground/40 hover:text-foreground/70 hover:bg-muted"
+              )}
+              title={isAuthenticated ? user?.username : "登录 / 注册"}
             >
-              <Settings size={16} />
+              {isAuthenticated
+                ? (
+                  <div className={cn(
+                    "w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold",
+                    isVintage ? "bg-accent text-white" : "bg-foreground/20 text-foreground"
+                  )}>
+                    {user?.username?.[0]?.toUpperCase()}
+                  </div>
+                )
+                : <User size={16} />
+              }
             </button>
+
+            {/* 管理员按钮 */}
+            <button
+              onClick={handleAdminClick}
+              className={cn(
+                "p-2 rounded-full transition-all",
+                activeTab === "admin"
+                  ? isVintage ? "text-accent bg-accent/10" : "text-foreground bg-muted"
+                  : "text-foreground/40 hover:text-foreground/70 hover:bg-muted"
+              )}
+              title="管理员面板"
+            >
+              <ShieldCheck size={16} />
+            </button>
+
             <button
               onClick={() => setMobileOpen(!mobileOpen)}
               className="md:hidden p-2 rounded-full text-foreground/40 hover:text-foreground/70 hover:bg-muted transition-all"
@@ -134,6 +174,17 @@ export function Navbar({ activeTab, onTabChange }: NavbarProps) {
                   {link.label}
                 </button>
               ))}
+              <button
+                onClick={() => { onTabChange("account"); setMobileOpen(false) }}
+                className={cn(
+                  "px-4 py-2.5 text-[14px] font-medium rounded-xl text-left transition-colors",
+                  activeTab === "account"
+                    ? isVintage ? "text-white bg-accent" : "text-foreground bg-muted"
+                    : "text-foreground/50 hover:text-foreground/80"
+                )}
+              >
+                {isAuthenticated ? `账号 (${user?.username})` : "登录 / 注册"}
+              </button>
             </div>
           </motion.div>
         )}
