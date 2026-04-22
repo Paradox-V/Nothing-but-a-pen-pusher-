@@ -5,6 +5,8 @@ RSS Flask 路由
 提供 RSS 订阅源管理和条目查询的 REST API
 """
 
+import logging
+
 from flask import Blueprint, request, jsonify
 
 from modules.rss.db import RSSDB
@@ -12,6 +14,8 @@ from modules.rss.fetcher import RSSFetcher
 from modules.rss.discover import RSSHubDiscover
 from utils.auth import require_auth
 from utils.url_security import validate_url
+
+logger = logging.getLogger(__name__)
 
 rss_bp = Blueprint("rss", __name__)
 
@@ -95,6 +99,15 @@ def add_feed():
         kwargs["max_items"] = int(data["max_items"])
     if "max_age_days" in data and data["max_age_days"] is not None:
         kwargs["max_age_days"] = int(data["max_age_days"])
+
+    # 从用户 JWT 获取 owner_id（若有）
+    try:
+        from flask import g
+        owner_id = getattr(g, "current_user_id", None)
+        if owner_id:
+            kwargs["owner_id"] = owner_id
+    except Exception:
+        pass
 
     db = _get_db()
     try:
@@ -240,3 +253,163 @@ def custom_discover_feed():
         return jsonify(result)
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ── 微信公众号 RSS 发现 ──────────────────────────────────────
+
+
+@rss_bp.route("/api/rss/discover/wechat", methods=["POST"])
+@require_auth
+def discover_wechat():
+    """将微信公众号 URL 或名称转化为 RSS Feed URL。"""
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"success": False, "error": "请求体不能为空"}), 400
+
+    url_or_name = (data.get("url") or data.get("name") or "").strip()
+    if not url_or_name:
+        return jsonify({"success": False, "error": "请提供公众号链接或名称"}), 400
+
+    from flask import current_app
+    from modules.rss.wechat_mp import WechatMPConverter
+    from utils.config import load_config
+
+    config = load_config()
+    rsshub_config = current_app.config.get("RSSHUB_CONFIG", {})
+    rsshub_base = rsshub_config.get("base_url", "http://127.0.0.1:1200")
+    wechat_mp_cfg = config.get("wechat_mp", {})
+
+    converter = WechatMPConverter(rsshub_base_url=rsshub_base,
+                                  wechat_mp_config=wechat_mp_cfg)
+    result = converter.to_rss_url(url_or_name)
+    if not result.get("success"):
+        return jsonify(result), 400
+    return jsonify(result)
+
+
+@rss_bp.route("/api/rss/detect-type", methods=["POST"])
+@require_auth
+def detect_feed_type():
+    """自动检测 URL 类型，返回建议的处理方式。"""
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"success": False, "error": "请求体不能为空"}), 400
+
+    url = data.get("url", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "请提供 URL"}), 400
+
+    from modules.rss.wechat_mp import WechatMPConverter
+    from urllib.parse import urlparse
+
+    result = {"url": url, "type": "unknown", "suggested_action": "generic_discover"}
+
+    try:
+        parsed_url = urlparse(url)
+        hostname = parsed_url.hostname or ""
+    except Exception:
+        hostname = ""
+
+    converter = WechatMPConverter()
+    if converter.is_wechat_mp_url(url):
+        result["type"] = "wechat_mp"
+        result["suggested_action"] = "wechat_discover"
+        result["description"] = "微信公众号"
+    elif hostname == "weibo.com" or hostname.endswith(".weibo.com"):
+        result["type"] = "weibo"
+        result["suggested_action"] = "rsshub_discover"
+        result["description"] = "微博"
+    elif hostname == "zhihu.com" or hostname.endswith(".zhihu.com"):
+        result["type"] = "zhihu"
+        result["suggested_action"] = "rsshub_discover"
+        result["description"] = "知乎"
+    elif url.endswith(".xml") or "rss" in url.lower() or "feed" in url.lower() or "atom" in url.lower():
+        result["type"] = "rss_url"
+        result["suggested_action"] = "direct_subscribe"
+        result["description"] = "RSS/Atom 订阅地址"
+    else:
+        result["type"] = "website"
+        result["suggested_action"] = "generic_discover"
+        result["description"] = "普通网站"
+
+    return jsonify(result)
+
+
+# ── AI RSS 搜索 ───────────────────────────────────────────────
+
+
+@rss_bp.route("/api/rss/search", methods=["POST"])
+@require_auth
+def search_rss():
+    """根据话题关键词搜索相关 RSS 源。"""
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"success": False, "error": "请求体不能为空"}), 400
+
+    topic = data.get("topic", "").strip()
+    if not topic:
+        return jsonify({"success": False, "error": "请提供搜索话题"}), 400
+
+    max_results = min(data.get("max_results", 10), 20)
+
+    try:
+        from utils.rss_search import RSSSearcher
+        from utils.config import load_config
+        config = load_config()
+        searcher = RSSSearcher(config.get("rss_search", {}))
+        results = searcher.search(topic, max_results=max_results)
+        return jsonify({
+            "success": True,
+            "topic": topic,
+            "results": results,
+        })
+    except Exception:
+        logger.exception("search_rss failed for topic: %s", topic)
+        return jsonify({"success": False, "error": "搜索服务暂时不可用"}), 500
+
+
+@rss_bp.route("/api/rss/bulk-subscribe", methods=["POST"])
+@require_auth
+def bulk_subscribe():
+    """批量订阅 RSS 源。"""
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"success": False, "error": "请求体不能为空"}), 400
+
+    feeds = data.get("feeds", [])
+    if not feeds:
+        return jsonify({"success": False, "error": "请提供订阅源列表"}), 400
+
+    db = _get_db()
+    success = 0
+    failed = 0
+    errors = []
+
+    for item in feeds:
+        name = item.get("name", "").strip()
+        url = item.get("url", "").strip()
+        if not name or not url:
+            errors.append({"url": url, "error": "name 和 url 不能为空"})
+            failed += 1
+            continue
+
+        is_safe, url_error = validate_url(url)
+        if not is_safe:
+            errors.append({"url": url, "error": f"URL 校验失败: {url_error}"})
+            failed += 1
+            continue
+
+        try:
+            db.add_feed(name, url)
+            success += 1
+        except Exception:
+            logger.warning("bulk_subscribe: add_feed failed for url=%s", url)
+            errors.append({"url": url, "error": "添加失败"})
+            failed += 1
+
+    return jsonify({
+        "success": success,
+        "failed": failed,
+        "total": len(feeds),
+        "errors": errors,
+    })

@@ -53,6 +53,9 @@ wcf:
   url: "http://127.0.0.1:17890"    # wcfLink HTTP 服务地址
   poll_interval: 3                   # 事件轮询间隔（秒）
   event_batch_size: 100              # 单次拉取事件数量上限
+  agent_enabled: true                # 非指令消息是否转 Agent 处理
+  agent_timeout: 60                  # Agent 响应超时秒数
+  agent_thinking_msg: "正在思考，请稍候..."  # Agent 处理中提示语
   commands:
     help: ["帮助", "菜单"]
     list: ["监控列表", "列表"]
@@ -64,3 +67,17 @@ monitor:
   schedules:
     daily_morning: "08:00"
     daily_evening: "20:00"
+
+wechat_mp:
+  enabled: false
+  method: "rsshub"             # rsshub | werss | custom
+  service_url: ""              # method=custom 时填外部 API 地址
+  werss_url: ""                # method=werss 时填 WeRSS 实例地址（如 http://127.0.0.1:4000）
+
+rss_search:
+  backends:
+    - feedly                   # Feedly Cloud Search（免费，无需 Key）
+    - internal                 # 基于现有语义搜索
+  feedly_locale: "zh"
+  max_results: 10
+  verify_feeds: true           # 是否验证 Feed 可访问性

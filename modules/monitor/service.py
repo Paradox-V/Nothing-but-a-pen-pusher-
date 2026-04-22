@@ -61,10 +61,12 @@ class MonitorService:
     # ── 任务 CRUD（代理到 DB，脱敏在 DB 层处理） ──
 
     def create_task(self, name: str, keywords: list, filters: dict | None,
-                    schedule: str, push_config: list) -> dict:
+                    schedule: str, push_config: list,
+                    owner_id: str | None = None) -> dict:
         import uuid
         task_id = str(uuid.uuid4())
-        return self.db.create_task(task_id, name, keywords, filters, schedule, push_config)
+        return self.db.create_task(task_id, name, keywords, filters, schedule,
+                                   push_config, owner_id=owner_id)
 
     def get_tasks(self) -> list[dict]:
         return self.db.get_tasks()
