@@ -1,5 +1,6 @@
 # Core dependencies (production)
 flask>=3.0
+requests>=2.31
 httpx>=0.27
 feedparser>=6.0
 pyyaml>=6.0
