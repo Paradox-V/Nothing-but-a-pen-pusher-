@@ -193,15 +193,28 @@ def handle_command(account_id: str, user_id: str, text: str):
                    f"已执行 {len(results)} 个任务，成功 {success} 个。")
 
 
+# 全局 AgentService 单例，避免每次消息都重新初始化
+_agent_svc = None
+
+
+def _get_agent_svc():
+    global _agent_svc
+    if _agent_svc is None:
+        from modules.agent.service import AgentService
+        _agent_svc = AgentService()
+    return _agent_svc
+
+
 def _handle_agent_message(account_id: str, user_id: str, text: str, wcf_cfg: dict):
     """将非指令消息路由到 Agent 处理。"""
+    t0 = time.time()
     binding = _db.get_binding_by_user(account_id, user_id)
     context_token = binding.get("context_token", "") if binding else ""
     binding_id = binding["id"] if binding else ""
 
     # 发送"正在思考"提示
     thinking_msg = wcf_cfg.get("agent_thinking_msg", "正在思考，请稍候...")
-    agent_timeout = wcf_cfg.get("agent_timeout", 60)
+    agent_timeout = wcf_cfg.get("agent_timeout", 120)
     try:
         _reply_raw(account_id, user_id, thinking_msg, context_token)
     except Exception:
@@ -218,12 +231,29 @@ def _handle_agent_message(account_id: str, user_id: str, text: str, wcf_cfg: dic
 
     try:
         from modules.chat.db import ChatDB
+        from datetime import datetime, timedelta
+
         db = ChatDB()
-        if not db.get_session(session_id):
+
+        # 记忆管理：超过 context_reset_hours 小时未活跃则重置上下文
+        reset_hours = wcf_cfg.get("context_reset_hours", 5)
+        existing = db.get_session(session_id)
+        if existing:
+            last_active = existing.get("updated_at", "")
+            if last_active:
+                try:
+                    last_dt = datetime.fromisoformat(last_active)
+                    if datetime.now() - last_dt > timedelta(hours=reset_hours):
+                        db.clear_session_messages(session_id)
+                        logger.info("WCF session %s context reset (inactive %.1fh)",
+                                    session_id, reset_hours)
+                except (ValueError, TypeError):
+                    pass
+        else:
             db.create_session(session_id, title=f"微信对话 {user_id[:8]}", mode="agent")
 
-        from modules.agent.service import AgentService
-        svc = AgentService()
+        svc = _get_agent_svc()
+        logger.info("Agent init took %.1fs", time.time() - t0)
 
         full_text = ""
         import threading
@@ -244,6 +274,7 @@ def _handle_agent_message(account_id: str, user_id: str, text: str, wcf_cfg: dic
             except Exception as exc:
                 error_container.append(str(exc))
 
+        t1 = time.time()
         # 复制当前线程的 ContextVar 上下文到新线程
         ctx = contextvars.copy_context()
         t = threading.Thread(target=ctx.run, args=(_run_agent,), daemon=True)
@@ -251,6 +282,7 @@ def _handle_agent_message(account_id: str, user_id: str, text: str, wcf_cfg: dic
         t.join(timeout=agent_timeout)
 
         if t.is_alive():
+            logger.warning("Agent timed out after %ds for %s", agent_timeout, user_id)
             full_text = "处理超时，请稍后重试或换个更简短的问题。"
         elif error_container:
             full_text = f"处理出错：{error_container[0]}"
@@ -259,6 +291,9 @@ def _handle_agent_message(account_id: str, user_id: str, text: str, wcf_cfg: dic
 
         if not full_text:
             full_text = "暂时无法回答，请稍后再试。"
+
+        logger.info("Agent total %.1fs (llm=%.1fs), reply %d chars",
+                     time.time() - t0, time.time() - t1, len(full_text))
 
     except Exception as e:
         logger.error("Agent 处理失败 %s/%s: %s", account_id, user_id, e)

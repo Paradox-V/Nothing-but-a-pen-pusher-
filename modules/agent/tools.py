@@ -1,6 +1,7 @@
 """LangChain Agent 工具定义 —— 包装现有数据访问接口"""
 
 import json
+import os
 from contextvars import ContextVar
 
 from langchain_core.tools import tool
@@ -423,6 +424,73 @@ def subscribe_rss(feed_url: str, feed_name: str) -> str:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
 
+@tool
+def web_search(query: str, max_results: int = 5) -> str:
+    """当内部信源（新闻库、RSS、热榜）搜索无结果时，使用 Tavily 进行网络搜索。
+
+    这是最后的搜索手段。请优先使用内部工具（search_news_semantic、
+    search_multi_source、search_rss_by_topic 等），仅在它们返回无结果
+    或结果不足时才调用此工具。
+
+    Args:
+        query: 搜索查询文本
+        max_results: 返回结果数量，默认5
+    """
+    try:
+        import requests as _requests
+        from utils.config import load_config
+
+        config = load_config()
+        ws_cfg = config.get("web_search", {})
+        api_key = ws_cfg.get("api_key", "") or os.environ.get("TAVILY_API_KEY", "")
+
+        if not api_key:
+            return json.dumps({"error": "网络搜索未配置 API key"}, ensure_ascii=False)
+
+        resp = _requests.post(
+            "https://api.tavily.com/search",
+            json={
+                "api_key": api_key,
+                "query": query,
+                "max_results": max_results,
+                "search_depth": "basic",
+                "include_answer": False,
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        results = []
+        for item in data.get("results", []):
+            url = item.get("url", "")
+            # 从 URL 提取域名作为来源
+            source_name = ""
+            if url:
+                try:
+                    from urllib.parse import urlparse
+                    source_name = urlparse(url).netloc
+                except Exception:
+                    pass
+            results.append({
+                "title": item.get("title", ""),
+                "url": url,
+                "content": item.get("content", "")[:300],
+                "source_name": source_name,
+                "source_type": "web",
+            })
+
+        if not results:
+            return json.dumps({
+                "results": [],
+                "message": f"网络搜索也未找到与「{query}」相关的结果",
+            }, ensure_ascii=False)
+
+        return json.dumps({"results": results, "total": len(results)}, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"error": f"网络搜索失败: {e}"}, ensure_ascii=False)
+
+
 def get_all_tools():
     """返回所有 Agent 工具列表。"""
     return [
@@ -437,5 +505,6 @@ def get_all_tools():
         run_monitor_task,
         search_rss_by_topic,
         subscribe_rss,
+        web_search,
     ]
 

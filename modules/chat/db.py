@@ -166,6 +166,27 @@ class ChatDB:
         finally:
             conn.close()
 
+    def get_last_active_time(self, session_id: str) -> str | None:
+        """获取会话最后活跃时间（updated_at）。"""
+        conn = self._get_conn()
+        try:
+            row = conn.execute(
+                "SELECT updated_at FROM chat_sessions WHERE id = ?",
+                (session_id,),
+            ).fetchone()
+            return row["updated_at"] if row else None
+        finally:
+            conn.close()
+
+    def clear_session_messages(self, session_id: str):
+        """清空会话的所有消息（保留会话本身）。"""
+        conn = self._get_conn()
+        try:
+            conn.execute("DELETE FROM chat_messages WHERE session_id = ?", (session_id,))
+            conn.commit()
+        finally:
+            conn.close()
+
     def get_recent_messages(self, session_id: str, limit: int = 20) -> list[dict]:
         """获取最近的 N 条消息（用于构建对话历史上下文）。
 

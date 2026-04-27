@@ -55,6 +55,7 @@ wcf:
   event_batch_size: 100              # 单次拉取事件数量上限
   agent_enabled: true                # 非指令消息是否转 Agent 处理
   agent_timeout: 60                  # Agent 响应超时秒数
+  context_reset_hours: 5             # 超过 N 小时未活跃则重置对话上下文
   agent_thinking_msg: "正在思考，请稍候..."  # Agent 处理中提示语
   commands:
     help: ["帮助", "菜单"]
@@ -81,3 +82,8 @@ rss_search:
   feedly_locale: "zh"
   max_results: 10
   verify_feeds: true           # 是否验证 Feed 可访问性
+
+web_search:
+  enabled: true                # 启用网络搜索 fallback
+  api_key: ""                  # Tavily API key（也可通过环境变量 TAVILY_API_KEY 配置）
+  max_results: 5               # 单次搜索返回结果数
