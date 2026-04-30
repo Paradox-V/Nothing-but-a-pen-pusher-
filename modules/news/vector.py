@@ -2,16 +2,21 @@
 语义向量引擎 —— Embedding 去重 + 分类 + 聚类 + 语义搜索
 
 基于 BAAI/bge-small-zh-v1.5 模型 + ChromaDB 实现。
+使用纯 onnxruntime 推理，不依赖 sentence-transformers / PyTorch。
 """
 
+import glob
 import hashlib
 import json
 import logging
+import os
 import sqlite3
 from typing import Any
 
 import chromadb
-from sentence_transformers import SentenceTransformer
+import numpy as np
+import onnxruntime as ort
+from transformers import AutoTokenizer
 
 logger = logging.getLogger(__name__)
 
@@ -102,32 +107,55 @@ CATEGORY_PROTOTYPES: dict[str, list[str]] = {
 # ── 向量引擎 ────────────────────────────────────────────────
 
 class NewsVectorEngine:
-    """Embedding 语义去重、分类、聚类、搜索。"""
+    """Embedding 语义去重、分类、聚类、搜索。纯 onnxruntime 推理。"""
 
     DEDUP_THRESHOLD = 0.78   # 语义去重阈值（适配短快讯，换几个词不会被误杀）
     CLUSTER_THRESHOLD = 0.85  # 聚类阈值
     CLASSIFY_THRESHOLD = 0.50  # Embedding 分类相似度阈值（从 0.28 提高到 0.50，减少不相关标签）
     MODEL_NAME = "BAAI/bge-small-zh-v1.5"
+    EMBEDDING_DIM = 512
 
     def __init__(self, db_path: str = "data/news.db",
                  chroma_dir: str = "data/chroma_db"):
         self.db_path = db_path
         self.chroma_dir = chroma_dir
-        self.model: SentenceTransformer | None = None
+        self._session: ort.InferenceSession | None = None
+        self._tokenizer: AutoTokenizer | None = None
         self._encode_fn = None  # 外部注入的编码函数（冷库复用时不加载模型）
         self.chroma_client: chromadb.PersistentClient | None = None
         self.collection: chromadb.Collection | None = None
         self._initialized = False
         self._category_embeddings: dict[str, list[float]] = {}
 
+    def _resolve_model_path(self) -> str:
+        """从 HuggingFace 缓存中找到本地模型路径。"""
+        cache = os.path.expanduser(
+            "~/.cache/huggingface/hub/models--BAAI--bge-small-zh-v1.5/snapshots"
+        )
+        if os.path.isdir(cache):
+            snaps = sorted(glob.glob(os.path.join(cache, "*")))
+            if snaps:
+                return snaps[-1]
+        return self.MODEL_NAME
+
     def initialize(self) -> None:
         """加载模型和 ChromaDB。"""
         if self._initialized:
             return
 
-        logger.info("加载 Embedding 模型: %s ...", self.MODEL_NAME)
-        self.model = SentenceTransformer(self.MODEL_NAME)
-        logger.info("模型加载完成，维度: %d", self.model.get_sentence_embedding_dimension())
+        model_path = self._resolve_model_path()
+        onnx_file = os.path.join(model_path, "model.onnx")
+
+        logger.info("加载 Embedding 模型: %s (onnxruntime) ...", model_path)
+
+        self._tokenizer = AutoTokenizer.from_pretrained(model_path)
+        if os.path.exists(onnx_file):
+            self._session = ort.InferenceSession(
+                onnx_file, providers=["CPUExecutionProvider"]
+            )
+            logger.info("ONNX 模型加载完成，维度: %d", self.EMBEDDING_DIM)
+        else:
+            raise FileNotFoundError(f"ONNX 模型文件不存在: {onnx_file}")
 
         self.chroma_client = chromadb.PersistentClient(path=self.chroma_dir)
         self.collection = self.chroma_client.get_or_create_collection(
@@ -163,16 +191,50 @@ class NewsVectorEngine:
 
     # ── Embedding 计算 ──────────────────────────────────────
 
+    ENCODE_BATCH_SIZE = 32  # 限制单批大小，避免内存峰值过高
+
+    def _encode_batch(self, texts: list[str]) -> list[list[float]]:
+        """单批 ONNX 推理: tokenizer → forward → CLS pooling → L2 normalize"""
+        inputs = self._tokenizer(
+            texts, padding=True, truncation=True,
+            max_length=512, return_tensors="np",
+        )
+        outputs = self._session.run(
+            None,
+            {
+                "input_ids": inputs["input_ids"].astype(np.int64),
+                "attention_mask": inputs["attention_mask"].astype(np.int64),
+                "token_type_ids": inputs.get(
+                    "token_type_ids", np.zeros_like(inputs["input_ids"])
+                ).astype(np.int64),
+            },
+        )
+        # CLS pooling: 取 [CLS] token (index 0) 的向量
+        cls_embeddings = outputs[0][:, 0, :]  # (batch, dim)
+        # L2 normalize
+        norms = np.linalg.norm(cls_embeddings, axis=1, keepdims=True)
+        norms = np.maximum(norms, 1e-12)
+        cls_embeddings = cls_embeddings / norms
+        return cls_embeddings.tolist()
+
     def _encode(self, texts: list[str]) -> list[list[float]]:
-        """批量化文本编码。优先使用注入的 encode_fn，否则用模型。"""
+        """批量化文本编码，分小批处理控制内存。优先使用注入的 encode_fn。"""
         if not texts:
             return []
         if self._encode_fn:
             return self._encode_fn(texts)
-        if not self.model:
+        if not self._session or not self._tokenizer:
             return []
-        embeddings = self.model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
-        return embeddings.tolist()
+
+        if len(texts) <= self.ENCODE_BATCH_SIZE:
+            return self._encode_batch(texts)
+
+        # 分批处理
+        all_embeddings: list[list[float]] = []
+        for i in range(0, len(texts), self.ENCODE_BATCH_SIZE):
+            batch = texts[i:i + self.ENCODE_BATCH_SIZE]
+            all_embeddings.extend(self._encode_batch(batch))
+        return all_embeddings
 
     def _text_for_embed(self, title: str, content: str) -> str:
         """拼接标题+内容前200字用于 embedding。"""
@@ -183,7 +245,7 @@ class NewsVectorEngine:
 
     def _init_category_embeddings(self) -> None:
         """为每个分类的示例文本计算 embedding，取平均值作为原型向量。"""
-        if not self.model:
+        if not self._session:
             return
         for cat, sentences in CATEGORY_PROTOTYPES.items():
             embs = self._encode(sentences)
@@ -260,7 +322,7 @@ class NewsVectorEngine:
                     break
 
         # 第二步：Embedding 相似度补充（仅对 Embedding 原型中的分类）
-        if self.model and self._initialized and self._category_embeddings:
+        if self._session and self._initialized and self._category_embeddings:
             text_emb = self._encode([text])[0]
             for cat, cat_emb in self._category_embeddings.items():
                 if cat in categories:
@@ -278,8 +340,6 @@ class NewsVectorEngine:
 
     def classify_texts(self, texts: list[str]) -> list[list[str]]:
         """批量多标签分类：关键词规则 + Embedding 相似度，一次 encode 所有文本。"""
-        import numpy as np
-
         # 第一步：对所有文本做关键词匹配
         all_keyword_cats: list[list[str]] = []
         for text in texts:
@@ -292,7 +352,7 @@ class NewsVectorEngine:
             all_keyword_cats.append(cats)
 
         # 第二步：批量 encode，计算 embedding 相似度
-        if self.model and self._initialized and self._category_embeddings:
+        if self._session and self._initialized and self._category_embeddings:
             embs = self._encode(texts)  # 一次 encode 全部
             cat_names = list(self._category_embeddings.keys())
             cat_matrix = np.array([self._category_embeddings[c] for c in cat_names])  # (C, D)
