@@ -543,7 +543,14 @@ class NewsVectorEngine:
                 if r:
                     o["content"] = r["content"]
                     o["url"] = r["url"]
-                    o["tags"] = json.loads(r["tags"])
+                    raw_tags = r["tags"]
+                    try:
+                        tags = json.loads(raw_tags)
+                        if not isinstance(tags, list):
+                            tags = [str(tags)]
+                    except (json.JSONDecodeError, TypeError, ValueError):
+                        tags = [raw_tags] if raw_tags else []
+                    o["tags"] = tags
                     o["created_at"] = r["created_at"]
 
         return output
@@ -553,8 +560,10 @@ class NewsVectorEngine:
     def sync_chroma_purge(self) -> int:
         """清理 ChromaDB 中已从 SQLite 删除的条目。"""
         conn = sqlite3.connect(self.db_path)
-        existing_ids = {str(r[0]) for r in conn.execute("SELECT id FROM news").fetchall()}
-        conn.close()
+        try:
+            existing_ids = {str(r[0]) for r in conn.execute("SELECT id FROM news").fetchall()}
+        finally:
+            conn.close()
 
         chroma_ids = self.collection.get()["ids"]
         to_delete = [cid for cid in chroma_ids if cid not in existing_ids]
@@ -571,12 +580,14 @@ class NewsVectorEngine:
         """首次部署时，将 SQLite 已有数据回填到 ChromaDB。"""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            "SELECT id, source_name, title, content, timestamp, url, tags, "
-            "COALESCE(category, '其他') as category, cluster_id "
-            "FROM news ORDER BY id"
-        ).fetchall()
-        conn.close()
+        try:
+            rows = conn.execute(
+                "SELECT id, source_name, title, content, timestamp, url, tags, "
+                "COALESCE(category, '其他') as category, cluster_id "
+                "FROM news ORDER BY id"
+            ).fetchall()
+        finally:
+            conn.close()
 
         if not rows:
             logger.info("回填: SQLite 无数据")
@@ -609,7 +620,12 @@ class NewsVectorEngine:
                 # 支持旧数据（单值字符串）和新数据（JSON 数组）
                 raw_cat = r["category"]
                 if raw_cat and raw_cat.startswith("["):
-                    cat = json.loads(raw_cat)
+                    try:
+                        cat = json.loads(raw_cat)
+                        if not isinstance(cat, list):
+                            cat = [str(cat)]
+                    except (json.JSONDecodeError, TypeError):
+                        cat = [raw_cat]
                 elif raw_cat and raw_cat != "其他":
                     cat = [raw_cat]
                 else:

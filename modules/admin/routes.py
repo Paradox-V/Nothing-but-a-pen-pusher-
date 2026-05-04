@@ -31,6 +31,18 @@ VALID_ROLES = {"user", "admin"}
 MAX_BROADCAST_LEN = 2000
 
 
+def _safe_stat(label: str, factory, *, key: str = "", **kwargs) -> dict:
+    """安全获取单个模块统计，异常时返回降级数据并记录日志。"""
+    fallback = kwargs.pop("fallback", {})
+    try:
+        return factory(**kwargs)
+    except Exception:
+        logger.warning("overview: %s 统计降级", label, exc_info=True)
+        if key:
+            return {key: {**fallback, "_degraded": True}}
+        return {**fallback, "_degraded": True}
+
+
 @admin_bp.route("/overview", methods=["GET"])
 @require_auth
 def overview():
@@ -38,78 +50,62 @@ def overview():
     data = {}
 
     # 用户统计
-    try:
+    def _users():
         from modules.account.db import AccountDB
-        adb = AccountDB()
-        data["users"] = {
-            "total": adb.get_user_count(),
-        }
-    except Exception:
-        data["users"] = {"total": 0}
+        return {"users": {"total": AccountDB().get_user_count()}}
+    data.update(_safe_stat("users", _users, key="users", fallback={"total": 0}))
 
     # 监控任务统计
-    try:
+    def _monitor():
         from modules.monitor.db import MonitorDB
         mdb = MonitorDB()
-        all_tasks = mdb.get_tasks()
-        active_tasks = [t for t in all_tasks if t.get("is_active")]
-        push_stats = mdb.get_today_push_stats()
-        data["monitor"] = {
-            "total_tasks": len(all_tasks),
-            "active_tasks": len(active_tasks),
-            "today_push_success": push_stats.get("success", 0),
-            "today_push_fail": push_stats.get("fail", 0),
-        }
-    except Exception:
-        data["monitor"] = {"total_tasks": 0, "active_tasks": 0}
+        tasks = mdb.get_tasks()
+        active = [t for t in tasks if t.get("is_active")]
+        stats = mdb.get_today_push_stats()
+        return {"monitor": {
+            "total_tasks": len(tasks), "active_tasks": len(active),
+            "today_push_success": stats.get("success", 0),
+            "today_push_fail": stats.get("fail", 0),
+        }}
+    data.update(_safe_stat("monitor", _monitor, key="monitor", fallback={"total_tasks": 0, "active_tasks": 0}))
 
     # RSS 统计
-    try:
+    def _rss():
         from modules.rss.db import RSSDB
-        rdb = RSSDB()
-        feeds = rdb.get_feeds(enabled_only=False)
-        enabled_feeds = [f for f in feeds if f.get("enabled")]
-        data["rss"] = {
+        feeds = RSSDB().get_feeds(enabled_only=False)
+        return {"rss": {
             "total_feeds": len(feeds),
-            "enabled_feeds": len(enabled_feeds),
-        }
-    except Exception:
-        data["rss"] = {"total_feeds": 0, "enabled_feeds": 0}
+            "enabled_feeds": sum(1 for f in feeds if f.get("enabled")),
+        }}
+    data.update(_safe_stat("rss", _rss, key="rss", fallback={"total_feeds": 0, "enabled_feeds": 0}))
 
     # 新闻统计
-    try:
+    def _news():
         from modules.news.db import NewsDB
-        ndb = NewsDB()
-        data["news"] = {"total": ndb.get_count()}
-    except Exception:
-        data["news"] = {"total": 0}
+        return {"news": {"total": NewsDB().get_count()}}
+    data.update(_safe_stat("news", _news, key="news", fallback={"total": 0}))
 
     # 微信绑定统计
-    try:
+    def _wcf():
         from modules.wcf.db import WCFDB
-        wdb = WCFDB()
-        bindings = wdb.list_bindings()
-        enabled_bindings = [b for b in bindings if b.get("enabled")]
-        data["wcf"] = {
+        bindings = WCFDB().list_bindings()
+        return {"wcf": {
             "bindings": len(bindings),
-            "enabled_bindings": len(enabled_bindings),
-        }
-    except Exception:
-        data["wcf"] = {"bindings": 0, "enabled_bindings": 0}
+            "enabled_bindings": sum(1 for b in bindings if b.get("enabled")),
+        }}
+    data.update(_safe_stat("wcf", _wcf, key="wcf", fallback={"bindings": 0, "enabled_bindings": 0}))
 
     # Scheduler 状态
-    try:
+    def _scheduler():
         from utils.scheduler_client import is_scheduler_alive
-        data["scheduler"] = {"alive": is_scheduler_alive()}
-    except Exception:
-        data["scheduler"] = {"alive": False}
+        return {"scheduler": {"alive": is_scheduler_alive()}}
+    data.update(_safe_stat("scheduler", _scheduler, key="scheduler", fallback={"alive": False}))
 
     # AI 状态
-    try:
+    def _ai():
         from ai import AI_AVAILABLE
-        data["ai"] = {"available": AI_AVAILABLE}
-    except Exception:
-        data["ai"] = {"available": False}
+        return {"ai": {"available": AI_AVAILABLE}}
+    data.update(_safe_stat("ai", _ai, key="ai", fallback={"available": False}))
 
     return jsonify(data)
 

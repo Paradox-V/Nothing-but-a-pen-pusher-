@@ -70,7 +70,9 @@ def spa_fallback(path):
 
 @app.route("/api/status")
 def api_status():
-    """全局状态"""
+    """全局状态（含降级标记）"""
+    import logging as _log
+    _logger = _log.getLogger(__name__)
     from modules.news.db import NewsDB
     from modules.hotlist.db import HotlistDB
     from modules.rss.db import RSSDB
@@ -89,30 +91,33 @@ def api_status():
                     count += _arch_conn.execute("SELECT COUNT(*) FROM news").fetchone()[0]
                 finally:
                     _arch_conn.close()
-        except Exception:
-            pass
+        except sqlite3.Error as e:
+            _logger.warning("status: 归档数据库读取降级: %s", e)
         status["news_count"] = count
         status["news"] = {"count": count, "available": True}
-    except (sqlite3.DatabaseError, sqlite3.OperationalError, OSError):
+    except (sqlite3.DatabaseError, sqlite3.OperationalError, OSError) as e:
+        _logger.warning("status: news 统计降级: %s", e)
         status["news_count"] = 0
-        status["news"] = {"count": 0, "available": False}
+        status["news"] = {"count": 0, "available": False, "_degraded": True}
 
     try:
         hotlist_db = HotlistDB()
         last_crawl = hotlist_db.get_last_crawl_time()
         status["hotlist_last_crawl"] = last_crawl
         status["hotlist"] = {"last_crawl": last_crawl, "available": True}
-    except (sqlite3.DatabaseError, sqlite3.OperationalError, OSError):
-        status["hotlist"] = {"available": False}
+    except (sqlite3.DatabaseError, sqlite3.OperationalError, OSError) as e:
+        _logger.warning("status: hotlist 统计降级: %s", e)
+        status["hotlist"] = {"available": False, "_degraded": True}
 
     try:
         rss_db = RSSDB()
         feeds = rss_db.get_feeds()
         status["rss_feed_count"] = len(feeds)
         status["rss"] = {"feed_count": len(feeds), "available": True}
-    except (sqlite3.DatabaseError, sqlite3.OperationalError, OSError):
+    except (sqlite3.DatabaseError, sqlite3.OperationalError, OSError) as e:
+        _logger.warning("status: rss 统计降级: %s", e)
         status["rss_feed_count"] = 0
-        status["rss"] = {"available": False}
+        status["rss"] = {"available": False, "_degraded": True}
 
     # AI 模块状态
     try:
