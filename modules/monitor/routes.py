@@ -5,14 +5,12 @@ import json
 from flask import Blueprint, Response, jsonify, request
 
 from modules.monitor.service import get_monitor_service
-from utils.auth import require_auth
 
 monitor_bp = Blueprint("monitor", __name__, url_prefix="/api/monitor")
 _monitor_svc = get_monitor_service()
 
 
 @monitor_bp.route("/tasks", methods=["GET"])
-@require_auth
 def get_tasks():
     """获取监控任务列表（push_config 脱敏）"""
     tasks = _monitor_svc.get_tasks()
@@ -20,7 +18,6 @@ def get_tasks():
 
 
 @monitor_bp.route("/tasks", methods=["POST"])
-@require_auth
 def create_task():
     """创建监控任务"""
     data = request.json or {}
@@ -50,7 +47,6 @@ def create_task():
 
 
 @monitor_bp.route("/tasks/<task_id>", methods=["GET"])
-@require_auth
 def get_task(task_id):
     """获取任务详情（push_config 脱敏）"""
     task = _monitor_svc.get_task(task_id)
@@ -60,7 +56,6 @@ def get_task(task_id):
 
 
 @monitor_bp.route("/tasks/<task_id>", methods=["PUT"])
-@require_auth
 def update_task(task_id):
     """部分更新任务（只允许修改用户字段）"""
     data = request.json or {}
@@ -77,7 +72,6 @@ def update_task(task_id):
 
 
 @monitor_bp.route("/tasks/<task_id>", methods=["DELETE"])
-@require_auth
 def delete_task(task_id):
     """删除监控任务"""
     ok = _monitor_svc.delete_task(task_id)
@@ -87,7 +81,6 @@ def delete_task(task_id):
 
 
 @monitor_bp.route("/tasks/<task_id>/run", methods=["POST"])
-@require_auth
 def run_task(task_id):
     """手动触发监控任务执行（后台线程，立即返回）"""
     if _monitor_svc.is_task_running(task_id):
@@ -99,7 +92,6 @@ def run_task(task_id):
 
 
 @monitor_bp.route("/tasks/<task_id>/logs", methods=["GET"])
-@require_auth
 def get_push_logs(task_id):
     """获取推送日志"""
     logs = _monitor_svc.get_push_logs(task_id)
@@ -107,7 +99,6 @@ def get_push_logs(task_id):
 
 
 @monitor_bp.route("/test-push", methods=["POST"])
-@require_auth
 def test_push():
     """测试推送渠道"""
     data = request.json or {}

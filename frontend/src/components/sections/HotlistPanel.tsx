@@ -74,7 +74,8 @@ export function HotlistPanel() {
     try {
       const res = await apiFetch("/hotlist/platforms")
       if (!res.ok) throw new Error("获取平台列表失败")
-      setPlatforms(await res.json())
+      const data = await res.json()
+      if (Array.isArray(data)) setPlatforms(data)
     } catch { /* platforms 不是关键，静默 */ }
   }, [])
 

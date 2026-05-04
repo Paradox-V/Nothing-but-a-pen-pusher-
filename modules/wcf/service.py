@@ -1,364 +1,224 @@
-"""WCF 事件消费 + 指令处理服务"""
+"""Agent 模式问答服务 —— ReAct Agent via langgraph + 工具调用 + 持久化"""
 
+import asyncio
 import json
 import logging
-import time
+from typing import Generator
 
-from modules.wcf import client
-from modules.wcf.db import WCFDB
+from modules.agent.tools import get_all_tools
 
 logger = logging.getLogger(__name__)
 
-_db = WCFDB()
+AGENT_SYSTEM_PROMPT = """你是"信源汇总"平台的智能分析助手。你可以使用多种工具来检索信息，然后基于检索结果回答用户问题。
 
-# 微信单条消息最大长度（字符）
-_WX_MAX_MSG_LEN = 1800
-
-
-def consume_events():
-    """从 wcfLink 拉取新事件并处理。
-
-    游标推进语义：
-    - 分类完成（outbound、非文本、非指令文本）→ 推进游标
-    - 指令处理成功 → 推进游标
-    - 处理失败（临时异常）→ 不推进，下次重试
-    """
-    from utils.config import load_config
-    config = load_config()
-    wcf_cfg = config.get("wcf", {})
-    batch_size = wcf_cfg.get("event_batch_size", 100)
-
-    cursor = _db.get_cursor()
-    events = client.list_events(after_id=cursor, limit=batch_size)
-
-    if not events:
-        return
-
-    # 按 id 升序处理
-    for event in sorted(events, key=lambda e: e.get("id", 0)):
-        try:
-            result = _process_event(event)
-            # 分类完成或指令处理成功 → 推进
-            if result:
-                _db.set_cursor(event["id"])
-            # result=False 表示处理失败，不推进游标，下次重试
-        except Exception as e:
-            logger.error("WCF event %s process error: %s", event.get("id"), e)
-            # 异常不推进游标
+规则：
+- 先思考需要哪些信息，再选择合适的工具检索
+- 优先使用内部信源工具（search_news_semantic、search_multi_source、search_rss_by_topic 等）
+- 如果内部信源返回无结果或结果不足，再使用 web_search 进行网络搜索
+- 如果第一次检索结果不够，可以换关键词或换工具再次检索
+- 只基于工具检索到的资料回答，不要编造信息
+- 引用资料时标注来源（如 [新浪快讯]、[微博热榜]、[网页搜索]）
+- 如果检索结果不足以回答，明确告知用户
+- 回答使用中文，简洁专业，重点突出"""
 
 
-def _process_event(event: dict) -> bool:
-    """处理单条事件。
+class AgentService:
+    """Agent 模式问答服务，持久化语义与 ChatService 对齐。"""
 
-    Returns:
-        True: 分类完成或指令处理成功，可推进游标
-        False: 处理失败，不应推进游标
-    """
-    event_id = event.get("id", 0)
-    direction = event.get("direction", "")
-    account_id = event.get("account_id", "")
-    from_user_id = event.get("from_user_id", "")
-    context_token = event.get("context_token", "")
-    body_text = event.get("body_text", "")
-
-    # outbound 事件：分类完成，推进游标
-    if direction != "inbound":
-        return True
-
-    # 非文本消息：upsert 联系人，分类完成
-    event_type = event.get("event_type", "")
-    if event_type != "text":
-        _db.upsert_binding(
-            account_id, from_user_id,
-            context_token=context_token,
-            last_message=f"[{event_type}]",
-        )
-        return True
-
-    # 文本消息：upsert 联系人 + 处理指令
-    _db.upsert_binding(
-        account_id, from_user_id,
-        context_token=context_token,
-        last_message=body_text,
-    )
-    try:
-        handle_command(account_id, from_user_id, body_text)
-        return True
-    except Exception as e:
-        logger.error("WCF command handling failed for event %s: %s", event_id, e)
-        return False
-
-
-def handle_command(account_id: str, user_id: str, text: str):
-    """匹配并执行微信指令；非指令消息路由到 Agent。
-
-    指令范围：帮助、监控列表、报告、报告 <任务名>
-    未匹配指令 → 若 agent_enabled 则走 Agent，否则忽略
-    """
-    text = text.strip()
-    if not text:
-        return
-
-    from utils.config import load_config
-    config = load_config()
-    wcf_cfg = config.get("wcf", {})
-    commands = wcf_cfg.get("commands", {})
-    help_words = commands.get("help", ["帮助", "菜单"])
-    list_words = commands.get("list", ["监控列表", "列表"])
-    report_words = commands.get("report", ["报告", "日报", "监控"])
-
-    # 判断指令类型
-    cmd = _match_command(text, help_words, list_words, report_words)
-
-    if not cmd:
-        # 非精确指令：尝试路由到 Agent
-        agent_enabled = wcf_cfg.get("agent_enabled", True)
-        if agent_enabled:
-            _handle_agent_message(account_id, user_id, text, wcf_cfg)
-        return
-
-    # 查找绑定
-    binding = _db.get_binding_by_user(account_id, user_id)
-    if not binding or not binding.get("enabled"):
-        _reply_raw(account_id, user_id, "您尚未启用监控服务，请联系管理员开通。")
-        return
-
-    if cmd == "help":
-        _reply_raw(account_id, user_id,
-                   "可用指令：\n"
-                   "• 帮助 — 显示此菜单\n"
-                   "• 监控列表 — 查看已绑定的任务\n"
-                   "• 报告 — 运行所有绑定的监控任务\n"
-                   "• 报告 <任务名> — 运行指定任务\n\n"
-                   "也可以直接用自然语言和我对话，例如：\n"
-                   "「帮我创建一个监控AI新闻的任务」\n"
-                   "「搜索今天的科技热点」")
-        return
-
-    if cmd == "list":
-        task_ids = _db.get_binding_tasks(binding["id"])
-        if not task_ids:
-            _reply_raw(account_id, user_id, "当前未绑定任何监控任务。")
-            return
-        from modules.monitor.db import MonitorDB
-        mdb = MonitorDB()
-        names = []
-        for tid in task_ids:
-            task = mdb.get_task(tid)
-            if task:
-                names.append(task.get("name", tid))
-        _reply_raw(account_id, user_id,
-                   f"已绑定 {len(names)} 个任务：\n" + "\n".join(f"• {n}" for n in names))
-        return
-
-    if cmd == "report":
-        task_name = _extract_report_target(text, report_words)
-        task_ids = _db.get_binding_tasks(binding["id"])
-        if not task_ids:
-            _reply_raw(account_id, user_id, "当前未绑定任何监控任务。")
-            return
-
-        from modules.monitor.db import MonitorDB
-        mdb = MonitorDB()
-
-        if task_name:
-            # 精确匹配任务名
-            matched = []
-            for tid in task_ids:
-                task = mdb.get_task(tid)
-                if task and task.get("name") == task_name:
-                    matched.append(tid)
-            if not matched:
-                _reply_raw(account_id, user_id, f"未找到任务「{task_name}」。")
-                return
-            task_ids = matched
-
-        # 构造 override_push_config：推送给当前联系人
-        override_push = [{
-            "type": "wcf",
-            "account_id": account_id,
-            "to_user_id": user_id,
-            "context_token": binding.get("context_token", ""),
-        }]
-
-        from modules.monitor.service import get_monitor_service
-        svc = get_monitor_service()
-        results = []
-        for tid in task_ids:
-            result = svc.run_task(tid, override_push_config=override_push)
-            results.append(result)
-
-        success = sum(1 for r in results if r.get("status") == "success")
-        _reply_raw(account_id, user_id,
-                   f"已执行 {len(results)} 个任务，成功 {success} 个。")
-
-
-# 全局 AgentService 单例，避免每次消息都重新初始化
-_agent_svc = None
-
-
-def _get_agent_svc():
-    global _agent_svc
-    if _agent_svc is None:
-        from modules.agent.service import AgentService
-        _agent_svc = AgentService()
-    return _agent_svc
-
-
-def _handle_agent_message(account_id: str, user_id: str, text: str, wcf_cfg: dict):
-    """将非指令消息路由到 Agent 处理。"""
-    t0 = time.time()
-    binding = _db.get_binding_by_user(account_id, user_id)
-    context_token = binding.get("context_token", "") if binding else ""
-    binding_id = binding["id"] if binding else ""
-
-    # 发送"正在思考"提示
-    thinking_msg = wcf_cfg.get("agent_thinking_msg", "正在思考，请稍候...")
-    agent_timeout = wcf_cfg.get("agent_timeout", 120)
-    try:
-        _reply_raw(account_id, user_id, thinking_msg, context_token)
-    except Exception:
-        pass
-
-    # 构建 Agent 上下文
-    session_id = f"wcf_{account_id}_{user_id}"
-    agent_context = {
-        "binding_id": binding_id,
-        "account_id": account_id,
-        "user_id": user_id,
-        "context_token": context_token,
-    }
-
-    try:
+    def __init__(self):
         from modules.chat.db import ChatDB
-        from datetime import datetime, timedelta
+        self.db = ChatDB()
+        self._agent_executor = None
 
-        db = ChatDB()
+    def _get_agent_executor(self):
+        """延迟创建 langgraph ReAct Agent。"""
+        if self._agent_executor is not None:
+            return self._agent_executor
 
-        # 记忆管理：超过 context_reset_hours 小时未活跃则重置上下文
-        reset_hours = wcf_cfg.get("context_reset_hours", 5)
-        existing = db.get_session(session_id)
-        if existing:
-            last_active = existing.get("updated_at", "")
-            if last_active:
+        from ai.langchain_config import get_chat_model
+        from langgraph.prebuilt import create_react_agent
+
+        llm = get_chat_model(temperature=0.7, max_tokens=2000)
+        tools = get_all_tools()
+
+        self._agent_executor = create_react_agent(
+            model=llm,
+            tools=tools,
+            prompt=AGENT_SYSTEM_PROMPT,
+        )
+        return self._agent_executor
+
+    def chat(self, session_id: str, question: str,
+             context: dict | None = None) -> Generator[str, None, None]:
+        """Agent 模式对话，持久化语义与 ChatService.chat() 对齐。
+
+        Args:
+            session_id: 会话 ID
+            question: 用户消息
+            context: 可选上下文（binding_id, account_id, user_id, context_token 等），
+                     由微信服务传入，注入 Agent 工具调用链
+        """
+        from modules.agent.tools import set_agent_context
+        if context:
+            set_agent_context(context)
+
+        # 1. 自动设置会话标题
+        self.db.update_session_title_if_empty(session_id, question[:20])
+
+        # 2. 加载对话历史（先于 save_message，与 ChatService 第 71 行一致）
+        history = self.db.get_recent_messages(session_id, limit=10)
+
+        # 3. 保存用户消息（后于历史加载，与 ChatService 第 77 行一致）
+        self.db.save_message(session_id, "user", question)
+
+        # 4. 构建 agent 输入并流式执行
+        agent_executor = self._get_agent_executor()
+        full_content = ""
+        sources_json = ""
+        collected_sources = []
+
+        # history 不含当前 question（与 ChatService._build_messages 第 133 行一致）
+        messages = self._build_messages(question, history)
+
+        try:
+            import queue
+            import threading
+            from contextvars import copy_context
+
+            q: queue.Queue = queue.Queue()
+            _SENTINEL = object()
+
+            async def _run():
                 try:
-                    last_dt = datetime.fromisoformat(last_active)
-                    if datetime.now() - last_dt > timedelta(hours=reset_hours):
-                        db.clear_session_messages(session_id)
-                        logger.info("WCF session %s context reset (inactive %.1fh)",
-                                    session_id, reset_hours)
-                except (ValueError, TypeError):
-                    pass
-        else:
-            db.create_session(session_id, title=f"微信对话 {user_id[:8]}", mode="agent")
+                    async for event in agent_executor.astream_events(
+                        {"messages": messages}, version="v2"
+                    ):
+                        q.put(event)
+                except Exception as exc:
+                    q.put(exc)
+                finally:
+                    q.put(_SENTINEL)
 
-        svc = _get_agent_svc()
-        logger.info("Agent init took %.1fs", time.time() - t0)
+            # Capture current context (including _agent_context ContextVar)
+            # so tools inside the thread can access it
+            _ctx = copy_context()
 
-        full_text = ""
-        import threading
-        import contextvars
+            def _thread_target():
+                loop = asyncio.new_event_loop()
+                try:
+                    loop.run_until_complete(_run())
+                finally:
+                    loop.close()
 
-        result_container = []
-        error_container = []
+            t = threading.Thread(target=_ctx.run, args=(_thread_target,), daemon=True)
+            t.start()
 
-        def _run_agent():
-            try:
-                for chunk in svc.chat(session_id, text, context=agent_context):
-                    try:
-                        event = json.loads(chunk)
-                        if event.get("type") == "content":
-                            result_container.append(event.get("text", ""))
-                    except Exception:
-                        pass
-            except Exception as exc:
-                error_container.append(str(exc))
+            while True:
+                item = q.get()
+                if item is _SENTINEL:
+                    break
+                if isinstance(item, Exception):
+                    raise item
 
-        t1 = time.time()
-        # 复制当前线程的 ContextVar 上下文到新线程
-        ctx = contextvars.copy_context()
-        t = threading.Thread(target=ctx.run, args=(_run_agent,), daemon=True)
-        t.start()
-        t.join(timeout=agent_timeout)
+                event = item
+                event_type = event.get("event", "")
 
-        if t.is_alive():
-            logger.warning("Agent timed out after %ds for %s", agent_timeout, user_id)
-            full_text = "处理超时，请稍后重试或换个更简短的问题。"
-        elif error_container:
-            full_text = f"处理出错：{error_container[0]}"
-        else:
-            full_text = "".join(result_container)
+                if event_type == "on_tool_start":
+                    tool_name = event.get("name", "")
+                    tool_input = event.get("data", {}).get("input", {})
+                    yield json.dumps({
+                        "type": "tool_call",
+                        "tool": tool_name,
+                        "args": tool_input if isinstance(tool_input, dict) else {},
+                    }, ensure_ascii=False)
 
-        if not full_text:
-            full_text = "暂时无法回答，请稍后再试。"
+                elif event_type == "on_tool_end":
+                    tool_name = event.get("name", "")
+                    output = str(event.get("data", {}).get("output", ""))
+                    summary = self._summarize_tool_result(tool_name, output)
+                    self._collect_sources(output, collected_sources)
+                    yield json.dumps({
+                        "type": "tool_result",
+                        "tool": tool_name,
+                        "summary": summary,
+                    }, ensure_ascii=False)
 
-        logger.info("Agent total %.1fs (llm=%.1fs), reply %d chars",
-                     time.time() - t0, time.time() - t1, len(full_text))
+                elif event_type == "on_chat_model_stream":
+                    chunk = event.get("data", {}).get("chunk")
+                    if chunk and hasattr(chunk, "content") and chunk.content:
+                        full_content += chunk.content
+                        yield json.dumps({
+                            "type": "content",
+                            "text": chunk.content,
+                        }, ensure_ascii=False)
 
-    except Exception as e:
-        logger.error("Agent 处理失败 %s/%s: %s", account_id, user_id, e)
-        full_text = "处理您的请求时出现了错误，请稍后重试。"
+        except Exception as e:
+            logger.error("Agent 执行失败: %s", e)
+            error_msg = full_content or f"Agent 执行出错: {e}"
+            yield json.dumps({"type": "error", "text": error_msg}, ensure_ascii=False)
+            if full_content:
+                self.db.save_message(session_id, "assistant", full_content, sources="")
+            return
 
-    _send_long_text(account_id, user_id, full_text, context_token)
+        # 5. 保存 assistant 消息 + sources
+        if collected_sources:
+            sources_json = json.dumps(collected_sources, ensure_ascii=False)
+        if full_content:
+            self.db.save_message(session_id, "assistant", full_content, sources=sources_json)
+
+        # 6. yield sources + done
+        if sources_json:
+            yield json.dumps({"type": "sources", "data": sources_json}, ensure_ascii=False)
+        yield json.dumps({"type": "done"})
+
+    def _build_messages(self, question: str, history: list[dict]) -> list[dict]:
+        """构建 langgraph 消息列表。
+
+        chat_history 不含当前 question，question 作为最后一条 HumanMessage。
+        """
+        messages = []
+        for msg in history:
+            role = msg.get("role", "")
+            if role == "user":
+                messages.append({"role": "user", "content": msg["content"]})
+            elif role == "assistant":
+                messages.append({"role": "assistant", "content": msg["content"]})
+        messages.append({"role": "user", "content": question})
+        return messages
+
+    def _summarize_tool_result(self, tool_name: str, output: str) -> str:
+        """为前端生成工具结果摘要。"""
+        try:
+            data = json.loads(output)
+            if isinstance(data, list):
+                return f"找到 {len(data)} 条结果"
+            if isinstance(data, dict):
+                if "error" in data:
+                    return data["error"]
+                if "items" in data:
+                    return f"找到 {len(data['items'])} 条结果"
+                if "total" in data:
+                    return f"共 {data.get('total', '?')} 条"
+            return "完成"
+        except (json.JSONDecodeError, TypeError):
+            return "完成"
+
+    def _collect_sources(self, output: str, sources: list):
+        """从工具结果中提取来源信息。"""
+        try:
+            data = json.loads(output)
+            items = data if isinstance(data, list) else data.get("items", [])
+            for item in items[:5]:
+                if isinstance(item, dict) and item.get("title"):
+                    sources.append({
+                        "title": item.get("title", ""),
+                        "source": item.get("source_name", item.get("platform_name", "")),
+                        "url": item.get("url", ""),
+                        "source_type": item.get("source_type", ""),
+                    })
+        except (json.JSONDecodeError, TypeError):
+            pass
 
 
-def _send_long_text(account_id: str, user_id: str, text: str,
-                    context_token: str = ""):
-    """将长文本分段发送，避免超出微信消息长度限制。"""
-    if len(text) <= _WX_MAX_MSG_LEN:
-        _reply_raw(account_id, user_id, text, context_token)
-        return
-
-    parts = []
-    remaining = text
-    while remaining:
-        parts.append(remaining[:_WX_MAX_MSG_LEN])
-        remaining = remaining[_WX_MAX_MSG_LEN:]
-
-    for i, part in enumerate(parts):
-        prefix = f"（{i + 1}/{len(parts)}）\n" if len(parts) > 1 else ""
-        _reply_raw(account_id, user_id, prefix + part, context_token)
-        if i < len(parts) - 1:
-            time.sleep(0.5)  # 避免频率限制
-
-
-def _reply_raw(account_id: str, user_id: str, text: str, context_token: str = ""):
-    """发送回复消息到微信用户。
-
-    Raises: 发送失败时抛出异常，由调用方决定是否推进游标。
-    """
-    if not context_token:
-        binding = _db.get_binding_by_user(account_id, user_id)
-        context_token = binding.get("context_token", "") if binding else ""
-    client.send_text(account_id, user_id, text, context_token=context_token)
-
-
-def _reply(account_id: str, user_id: str, text: str):
-    """发送回复消息到微信用户（兼容旧调用）。"""
-    _reply_raw(account_id, user_id, text)
-
-
-def _match_command(text: str, help_words: list, list_words: list,
-                   report_words: list) -> str | None:
-    """匹配指令关键词，返回指令类型。"""
-    # 报告指令优先匹配（可能带参数）
-    for w in report_words:
-        if text == w or text.startswith(w + " "):
-            return "report"
-    for w in list_words:
-        if text == w:
-            return "list"
-    for w in help_words:
-        if text == w:
-            return "help"
-    return None
-
-
-def _extract_report_target(text: str, report_words: list) -> str | None:
-    """从报告指令文本中提取目标任务名。"""
-    for w in report_words:
-        if text.startswith(w + " "):
-            target = text[len(w):].strip()
-            return target if target else None
-    return None
-
+# WCF 模块别名 —— scheduler 和其他模块通过 WCFService 引用
+WCFService = AgentService

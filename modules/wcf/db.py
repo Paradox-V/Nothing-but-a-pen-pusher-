@@ -64,7 +64,7 @@ class WCFDB:
             for sql in migrations:
                 try:
                     conn.execute(sql)
-                except Exception:
+                except sqlite3.OperationalError:
                     pass
             conn.commit()
         finally:

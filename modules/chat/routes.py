@@ -5,7 +5,6 @@ import uuid
 from flask import Blueprint, Response, jsonify, request, stream_with_context
 
 from modules.chat.service import ChatService
-from utils.auth import require_auth
 
 chat_bp = Blueprint("chat", __name__, url_prefix="/api/chat")
 _chat_service = ChatService()
@@ -23,7 +22,6 @@ def _get_agent_service():
 
 
 @chat_bp.route("/sessions", methods=["GET"])
-@require_auth
 def get_sessions():
     """获取会话列表"""
     mode = request.args.get("mode")
@@ -32,7 +30,6 @@ def get_sessions():
 
 
 @chat_bp.route("/sessions", methods=["POST"])
-@require_auth
 def create_session():
     """创建新会话"""
     data = request.json or {}
@@ -44,7 +41,6 @@ def create_session():
 
 
 @chat_bp.route("/sessions/<session_id>", methods=["DELETE"])
-@require_auth
 def delete_session(session_id):
     """删除会话及其消息"""
     ok = _chat_service.db.delete_session(session_id)
@@ -54,7 +50,6 @@ def delete_session(session_id):
 
 
 @chat_bp.route("/sessions/<session_id>/messages", methods=["GET"])
-@require_auth
 def get_messages(session_id):
     """获取会话历史消息"""
     session = _chat_service.db.get_session(session_id)
@@ -65,7 +60,6 @@ def get_messages(session_id):
 
 
 @chat_bp.route("/sessions/<session_id>/chat", methods=["POST"])
-@require_auth
 def chat(session_id):
     """发送消息，SSE 流式响应"""
     session = _chat_service.db.get_session(session_id)

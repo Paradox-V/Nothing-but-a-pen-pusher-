@@ -3,7 +3,7 @@ import { motion } from "framer-motion"
 import {
   LayoutDashboard, Users, ClipboardList, ScrollText,
   MessageCircle, Rss, AlertCircle, CheckCircle, RefreshCw,
-  Bot, WifiOff, Wifi
+  WifiOff, Wifi
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useTheme } from "@/hooks/use-theme"
@@ -274,7 +274,7 @@ function TasksTab({ v }: { v: boolean }) {
               </div>
               <div className="text-[12px] text-foreground/40 mt-1">
                 关键词：{keywords} · 调度：{t.schedule as string}
-                {t.owner_id && ` · 归属：${(t.owner_id as string).slice(0, 8)}...`}
+                {t.owner_id ? ` · 归属：${(t.owner_id as string).slice(0, 8)}...` : null}
               </div>
             </div>
           )
@@ -325,14 +325,14 @@ function LogsTab({ v }: { v: boolean }) {
               <div className="text-[13px] font-medium text-foreground/70">
                 {(log.pushed_at as string)?.slice(0, 16)} · 任务 {(log.task_id as string)?.slice(0, 8)}...
               </div>
-              {log.report_summary && (
+              {log.report_summary ? (
                 <div className="text-[12px] text-foreground/40 truncate">
                   {log.report_summary as string}
                 </div>
-              )}
-              {log.error && (
+              ) : null}
+              {log.error ? (
                 <div className="text-[12px] text-red-400 truncate">{log.error as string}</div>
-              )}
+              ) : null}
             </div>
           </div>
         ))}

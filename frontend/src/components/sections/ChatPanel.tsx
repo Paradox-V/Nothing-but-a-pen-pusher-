@@ -6,7 +6,7 @@ import { Empty } from "@/components/shared/Empty"
 import { useTheme } from "@/hooks/use-theme"
 import { apiFetch } from "@/hooks/use-api"
 import { marked } from "marked"
-import * as DOMPurify from "dompurify"
+import DOMPurify from "dompurify"
 import ToolCallCard from "@/components/shared/ToolCallCard"
 
 interface Session { id: string; title: string; msg_count: number; mode?: string }
@@ -45,7 +45,7 @@ export function ChatPanel() {
   const { theme } = useTheme()
   const v = theme === "vintage"
 
-  useEffect(() => { apiFetch("/chat/sessions").then((r) => r.json()).then(setSessions).catch(() => {}) }, [])
+  useEffect(() => { apiFetch("/chat/sessions").then((r) => r.json()).then((d) => { if (Array.isArray(d)) setSessions(d) }).catch(() => {}) }, [])
 
   const loadMessages = useCallback(async (sessionId: string) => {
     setActiveSession(sessionId)
@@ -174,7 +174,7 @@ export function ChatPanel() {
           ><Bot size={13} /> Agent 模式</button>
         </div>
 
-        <button onClick={createSession}
+        <button onClick={() => createSession()}
           className={cn("flex items-center justify-center gap-2 p-3 rounded-xl border text-[13px] transition-all",
             "bg-accent/10 border-accent/20 text-accent hover:bg-accent/20"
           )}
@@ -274,7 +274,7 @@ export function ChatPanel() {
                     v ? "placeholder:text-foreground/45" : "placeholder:text-foreground/25"
                   )}
                 />
-                <button onClick={sendMessage} disabled={streaming || !input.trim()}
+                <button onClick={() => sendMessage()} disabled={streaming || !input.trim()}
                   className={cn("p-3 rounded-xl transition-all disabled:opacity-30",
                     "bg-accent text-accent-foreground hover:bg-accent/80"
                   )}

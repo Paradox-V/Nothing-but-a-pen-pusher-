@@ -169,10 +169,13 @@ def main():
                 _poll_wcf_events()
 
 
-def _get_monitor_config():
+def _get_monitor_config(_cache=[None, 0]):
+    import time as _t
+    if _cache[0] is not None and _t.time() - _cache[1] < 300:
+        return _cache[0]
     config = load_config()
     monitor_cfg = config.get("monitor", {})
-    return {
+    result = {
         "enabled": monitor_cfg.get("enabled", False),
         "check_interval": monitor_cfg.get("check_interval", 60),
         "schedules": monitor_cfg.get("schedules", {
@@ -180,6 +183,8 @@ def _get_monitor_config():
             "daily_evening": "20:00",
         }),
     }
+    _cache[0], _cache[1] = result, _t.time()
+    return result
 
 
 def _check_monitor_tasks():
@@ -193,13 +198,18 @@ def _check_monitor_tasks():
         logger.error("Monitor check failed: %s", e)
 
 
-def _get_wcf_config():
+def _get_wcf_config(_cache=[None, 0]):
+    import time as _t
+    if _cache[0] is not None and _t.time() - _cache[1] < 300:
+        return _cache[0]
     config = load_config()
     wcf_cfg = config.get("wcf", {})
-    return {
+    result = {
         "enabled": wcf_cfg.get("enabled", False),
         "poll_interval": wcf_cfg.get("poll_interval", 3),
     }
+    _cache[0], _cache[1] = result, _t.time()
+    return result
 
 
 def _poll_wcf_events():
@@ -219,17 +229,19 @@ def _poll_wcf_events():
         svc = WCFService()
         for evt in events:
             evt_id = evt.get("id", 0)
-            evt_type = evt.get("type", "")
+            evt_type = evt.get("event_type", "")
+            direction = evt.get("direction", "")
 
-            # 只处理收到的文本消息
-            if evt_type != "message/text":
+            # 只处理入站文本消息
+            if direction != "inbound" or evt_type != "text":
                 db.set_cursor(evt_id)
                 continue
 
             account_id = evt.get("account_id", "")
-            user_id = evt.get("from_user_id", evt.get("user_id", ""))
-            content = evt.get("content", "")
-            if not account_id or not user_id:
+            user_id = evt.get("from_user_id", "")
+            body_text = evt.get("body_text", "")
+            context_token = evt.get("context_token", "")
+            if not account_id or not user_id or not body_text.strip():
                 db.set_cursor(evt_id)
                 continue
 
@@ -243,25 +255,41 @@ def _poll_wcf_events():
             db.upsert_binding(
                 account_id=account_id, user_id=user_id,
                 display_name=evt.get("from_nickname", ""),
-                last_message=content,
+                last_message=body_text,
             )
 
             # 触发 agent 回复
             try:
-                reply = svc.chat(
+                reply_parts = []
+                for chunk_json in svc.chat(
                     session_id=binding["id"],
-                    question=content,
-                )
-                if reply:
+                    question=body_text,
+                    context={
+                        "binding_id": binding["id"],
+                        "account_id": account_id,
+                        "user_id": user_id,
+                        "context_token": context_token,
+                    },
+                ):
+                    try:
+                        chunk = json.loads(chunk_json)
+                        if chunk.get("type") == "content":
+                            reply_parts.append(chunk.get("text", ""))
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+                reply_text = "".join(reply_parts).strip()
+                if reply_text:
                     from modules.wcf.client import send_text
-                    send_text(account_id, user_id, reply)
+                    send_text(account_id, user_id, reply_text)
+                    logger.info("WCF reply sent to %s (%d chars)", user_id, len(reply_text))
             except Exception as e:
                 logger.error("WCF agent reply failed for %s: %s", user_id, e)
 
             db.set_cursor(evt_id)
 
     except ImportError as e:
-        logger.debug("WCF module not available: %s", e)
+        logger.warning("WCF module not available: %s", e)
     except Exception as e:
         logger.error("WCF event poll failed: %s", e)
 
@@ -299,12 +327,14 @@ def _run_news(db, aggregator, vec, purge_days, archive_enabled=False):
                 removed_ids = pipe_result.get("removed_row_ids", [])
                 if removed_ids:
                     conn = db._get_conn()
-                    placeholders = ",".join("?" * len(removed_ids))
-                    conn.execute(
-                        f"DELETE FROM news WHERE id IN ({placeholders})", removed_ids
-                    )
-                    conn.commit()
-                    conn.close()
+                    try:
+                        placeholders = ",".join("?" * len(removed_ids))
+                        conn.execute(
+                            f"DELETE FROM news WHERE id IN ({placeholders})", removed_ids
+                        )
+                        conn.commit()
+                    finally:
+                        conn.close()
                     logger.info("语义去重: 从 SQLite 删除 %d 条", len(removed_ids))
 
                 kept_row_ids = pipe_result.get("kept_row_ids", [])
@@ -312,14 +342,16 @@ def _run_news(db, aggregator, vec, purge_days, archive_enabled=False):
                 cluster_ids = pipe_result.get("cluster_ids", [])
                 if kept_row_ids and categories:
                     conn = db._get_conn()
-                    for rid, cat, cid in zip(kept_row_ids, categories, cluster_ids):
-                        cat_json = json.dumps(cat, ensure_ascii=False) if isinstance(cat, list) else cat
-                        conn.execute(
-                            "UPDATE news SET category = ?, cluster_id = ? WHERE id = ?",
-                            (cat_json, cid, rid),
-                        )
-                    conn.commit()
-                    conn.close()
+                    try:
+                        for rid, cat, cid in zip(kept_row_ids, categories, cluster_ids):
+                            cat_json = json.dumps(cat, ensure_ascii=False) if isinstance(cat, list) else cat
+                            conn.execute(
+                                "UPDATE news SET category = ?, cluster_id = ? WHERE id = ?",
+                                (cat_json, cid, rid),
+                            )
+                        conn.commit()
+                    finally:
+                        conn.close()
         except Exception as e:
             logger.error("向量管线异常: %s", e)
 
@@ -372,8 +404,10 @@ def _run_hotlist(db, fetcher, config, vec, archive_enabled=False):
         if purged > 0 and vec.is_healthy():
             try:
                 conn = db._get_conn()
-                existing_ids = [r[0] for r in conn.execute("SELECT id FROM hot_items").fetchall()]
-                conn.close()
+                try:
+                    existing_ids = [r[0] for r in conn.execute("SELECT id FROM hot_items").fetchall()]
+                finally:
+                    conn.close()
                 vec.purge_hotlist(existing_ids)
             except Exception as e:
                 logger.error("热榜 ChromaDB 清理失败: %s", e)
@@ -411,8 +445,10 @@ def _run_rss(db, fetcher, purge_days, vec, archive_enabled=False):
         if purged > 0 and vec.is_healthy():
             try:
                 conn = db._get_conn()
-                existing_ids = [r[0] for r in conn.execute("SELECT id FROM rss_items").fetchall()]
-                conn.close()
+                try:
+                    existing_ids = [r[0] for r in conn.execute("SELECT id FROM rss_items").fetchall()]
+                finally:
+                    conn.close()
                 vec.purge_rss(existing_ids)
             except Exception as e:
                 logger.error("RSS ChromaDB 清理失败: %s", e)

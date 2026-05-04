@@ -15,7 +15,6 @@ from modules.topic.service import (
     semantic_search,
 )
 from modules.topic.title_gen import generate_titles
-from utils.auth import require_auth
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +30,6 @@ def api_industries():
 
 
 @topic_bp.route("/api/topic/generate", methods=["POST"])
-@require_auth
 def api_generate():
     """
     生成选题建议。
@@ -97,6 +95,31 @@ def api_generate():
             })
 
     return jsonify(output)
+
+
+@topic_bp.route("/api/topic/regenerate-titles", methods=["POST"])
+def api_regenerate_titles():
+    """为单条新闻重新生成 3 个选题标题。
+
+    请求体: {"hotspot": {title, summary}, "industry": "AI科技", "keyword": "大模型"}
+    返回: {"titles": ["标题1", "标题2", "标题3"]}
+    """
+    data = request.get_json(force=True)
+    industry = data.get("industry", "")
+    keyword = data.get("keyword", "")
+    hotspot = data.get("hotspot", {})
+
+    if not industry or not keyword:
+        return jsonify({"error": "请提供行业和关键词"}), 400
+
+    news_item = {
+        "title": hotspot.get("title", ""),
+        "content": hotspot.get("summary", ""),
+    }
+
+    ai_config = _load_ai_config()
+    titles = generate_titles(news_item, industry, keyword, ai_config)
+    return jsonify({"titles": titles})
 
 
 def _load_ai_config() -> dict:

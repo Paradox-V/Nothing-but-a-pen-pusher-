@@ -5,14 +5,12 @@ from io import BytesIO
 
 from modules.wcf import client
 from modules.wcf.db import WCFDB
-from utils.auth import require_auth
 
 wcf_bp = Blueprint("wcf", __name__, url_prefix="/api/wcf")
 _db = WCFDB()
 
 
 @wcf_bp.route("/health", methods=["GET"])
-@require_auth
 def health():
     """探活：代理 wcfLink GET /health/live。"""
     ok = client.health_check()
@@ -22,7 +20,6 @@ def health():
 
 
 @wcf_bp.route("/login/start", methods=["POST"])
-@require_auth
 def login_start():
     """发起扫码登录。"""
     try:
@@ -33,7 +30,6 @@ def login_start():
 
 
 @wcf_bp.route("/login/status", methods=["GET"])
-@require_auth
 def login_status():
     """轮询登录状态。"""
     session_id = request.args.get("session_id", "").strip()
@@ -47,7 +43,6 @@ def login_status():
 
 
 @wcf_bp.route("/login/qr", methods=["GET"])
-@require_auth
 def login_qr():
     """获取二维码 PNG 图片。"""
     session_id = request.args.get("session_id", "").strip()
@@ -61,7 +56,6 @@ def login_qr():
 
 
 @wcf_bp.route("/accounts", methods=["GET"])
-@require_auth
 def list_accounts():
     """已登录账号列表。"""
     try:
@@ -72,7 +66,6 @@ def list_accounts():
 
 
 @wcf_bp.route("/bindings", methods=["GET"])
-@require_auth
 def list_bindings():
     """联系人绑定列表。"""
     bindings = _db.list_bindings()
@@ -83,7 +76,6 @@ def list_bindings():
 
 
 @wcf_bp.route("/bindings/<binding_id>", methods=["PUT"])
-@require_auth
 def update_binding(binding_id: str):
     """更新联系人（启用/禁用、修改 display_name）。"""
     data = request.json or {}
@@ -102,7 +94,6 @@ def update_binding(binding_id: str):
 
 
 @wcf_bp.route("/bindings/<binding_id>/tasks", methods=["POST"])
-@require_auth
 def bind_task(binding_id: str):
     """绑定监控任务到联系人。"""
     data = request.json or {}
@@ -117,7 +108,6 @@ def bind_task(binding_id: str):
 
 
 @wcf_bp.route("/bindings/<binding_id>/tasks/<task_id>", methods=["DELETE"])
-@require_auth
 def unbind_task(binding_id: str, task_id: str):
     """解绑监控任务。"""
     _db.unbind_task(binding_id, task_id)

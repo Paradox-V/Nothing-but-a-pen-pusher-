@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Menu, X, Settings, Sun, Moon, User, ShieldCheck } from "lucide-react"
+import { Menu, X, Sun, Moon, User, ShieldCheck } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useTheme } from "@/hooks/use-theme"
 import { useAuth } from "@/hooks/use-auth"

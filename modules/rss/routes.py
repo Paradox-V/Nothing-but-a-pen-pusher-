@@ -12,7 +12,6 @@ from flask import Blueprint, request, jsonify
 from modules.rss.db import RSSDB
 from modules.rss.fetcher import RSSFetcher
 from modules.rss.discover import RSSHubDiscover
-from utils.auth import require_auth
 from utils.url_security import validate_url
 
 logger = logging.getLogger(__name__)
@@ -71,7 +70,6 @@ def get_feeds():
 
 
 @rss_bp.route("/api/rss/feeds", methods=["POST"])
-@require_auth
 def add_feed():
     """
     添加 RSS 源
@@ -119,7 +117,6 @@ def add_feed():
 
 
 @rss_bp.route("/api/rss/feeds/<feed_id>", methods=["PUT"])
-@require_auth
 def update_feed(feed_id: str):
     """
     更新 RSS 源
@@ -176,7 +173,6 @@ def update_feed(feed_id: str):
 
 
 @rss_bp.route("/api/rss/feeds/<feed_id>", methods=["DELETE"])
-@require_auth
 def delete_feed(feed_id: str):
     """删除 RSS 源及其所有条目"""
     db = _get_db()
@@ -196,7 +192,6 @@ def delete_feed(feed_id: str):
 
 
 @rss_bp.route("/api/rss/fetch", methods=["POST"])
-@require_auth
 def fetch_feeds():
     """触发 RSS 抓取信号，scheduler 执行。"""
     from utils.crawl_trigger import CrawlTrigger
@@ -209,7 +204,6 @@ def fetch_feeds():
 
 
 @rss_bp.route("/api/rss/discover", methods=["POST"])
-@require_auth
 def discover_feed():
     """根据网站 URL 发现可订阅的 RSS 源"""
     data = request.get_json(silent=True)
@@ -238,7 +232,6 @@ def discover_feed():
 
 
 @rss_bp.route("/api/rss/discover/custom", methods=["POST"])
-@require_auth
 def custom_discover_feed():
     """使用自定义 CSS 选择器生成 RSS 源"""
     data = request.get_json(silent=True)
@@ -270,7 +263,6 @@ def custom_discover_feed():
 
 
 @rss_bp.route("/api/rss/discover/wechat", methods=["POST"])
-@require_auth
 def discover_wechat():
     """将微信公众号 URL 或名称转化为 RSS Feed URL。"""
     data = request.get_json(silent=True)
@@ -299,7 +291,6 @@ def discover_wechat():
 
 
 @rss_bp.route("/api/rss/detect-type", methods=["POST"])
-@require_auth
 def detect_feed_type():
     """自动检测 URL 类型，返回建议的处理方式。"""
     data = request.get_json(silent=True)
@@ -350,7 +341,6 @@ def detect_feed_type():
 
 
 @rss_bp.route("/api/rss/search", methods=["POST"])
-@require_auth
 def search_rss():
     """根据话题关键词搜索相关 RSS 源。"""
     data = request.get_json(silent=True)
@@ -380,7 +370,6 @@ def search_rss():
 
 
 @rss_bp.route("/api/rss/bulk-subscribe", methods=["POST"])
-@require_auth
 def bulk_subscribe():
     """批量订阅 RSS 源。"""
     data = request.get_json(silent=True)

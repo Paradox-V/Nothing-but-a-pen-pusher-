@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { motion } from "framer-motion"
-import { User, LogIn, UserPlus, LogOut, Key, Mail, Shield } from "lucide-react"
+import { LogIn, UserPlus, LogOut, Key, Mail, Shield } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useTheme } from "@/hooks/use-theme"
 import { useAuth } from "@/hooks/use-auth"

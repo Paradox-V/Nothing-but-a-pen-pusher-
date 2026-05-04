@@ -117,14 +117,14 @@ class MonitorService:
 
     @staticmethod
     def _is_task_due(task: dict, schedules: dict) -> bool:
-        """根据配置的时间窗口判断任务是否到期。"""
+        """根据配置的时间窗口判断任务是否到期。
+        
+        每个调度窗口（morning/evening）独立判断：
+        只检查当前 schedule 窗口今天是否已执行过，
+        而非简单地检查整个日期。
+        """
         now = datetime.now()
         today = now.strftime("%Y-%m-%d")
-
-        # 防御性处理 None 和空字符串
-        last_run = task.get("last_run_at") or ""
-        if isinstance(last_run, str) and last_run.startswith(today):
-            return False
 
         schedule = task.get("schedule", "daily_morning")
         target_time = schedules.get(schedule, "08:00")
@@ -134,7 +134,26 @@ class MonitorService:
         target_dt = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if now < target_dt:
             return False
-        return (now - target_dt).total_seconds() < 3600
+        if (now - target_dt).total_seconds() >= 3600:
+            return False
+
+        # 检查当前 schedule 窗口今天是否已执行过
+        # 精确匹配：只阻止同一 schedule 的重复执行
+        last_run = task.get("last_run_at") or ""
+        if isinstance(last_run, str) and last_run.startswith(today):
+            # 同一天已执行过 —— 检查是否是同一个 schedule 窗口
+            try:
+                last_dt = datetime.strptime(last_run, "%Y-%m-%d %H:%M:%S")
+                last_hour = last_dt.hour
+                # 判断上次执行属于哪个窗口（morning: < 14:00, evening: >= 14:00）
+                last_slot = "daily_evening" if last_hour >= 14 else "daily_morning"
+                if last_slot == schedule:
+                    return False
+            except (ValueError, TypeError):
+                # 解析失败则保守地认为已执行
+                return False
+
+        return True
 
     # ── 任务执行 ──
 

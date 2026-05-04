@@ -108,17 +108,27 @@ export function useSSE(url: string, body: Record<string, unknown>) {
  * - 其他路径优先使用用户 JWT (_user_token)，其次使用管理员 Token
  */
 export function apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
-  const userToken = localStorage.getItem("_user_token")
-  const adminToken = localStorage.getItem("_admin_token")
-  const isAdminPath = url.startsWith("/admin")
-  const token = isAdminPath
-    ? (adminToken || userToken)
-    : (userToken || adminToken)
-  const isBodyMethod = options.method === "POST" || options.method === "PUT" || options.method === "DELETE"
-  const headers: Record<string, string> = {
-    ...(isBodyMethod ? { "Content-Type": "application/json" } : {}),
-    ...((options.headers as Record<string, string>) || {}),
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  const buildHeaders = (tk?: string | null) => {
+    const isBodyMethod = options.method === "POST" || options.method === "PUT" || options.method === "DELETE"
+    const resolved = tk || localStorage.getItem("_user_token") || localStorage.getItem("_admin_token")
+    return {
+      ...(isBodyMethod ? { "Content-Type": "application/json" } : {}),
+      ...((options.headers as Record<string, string>) || {}),
+      ...(resolved ? { Authorization: `Bearer ${resolved}` } : {}),
+    }
   }
-  return fetch(`${API_BASE}${url}`, { ...options, headers })
+  const headers = buildHeaders()
+
+  return fetch(`${API_BASE}${url}`, { ...options, headers }).then(async (res) => {
+    if (res.status === 401 && !localStorage.getItem("_admin_token")) {
+      const data = await res.json().catch(() => ({}))
+      const tk = prompt(data.error || "请输入管理密钥以继续操作")
+      if (tk) {
+        localStorage.setItem("_admin_token", tk)
+        const retryHeaders = buildHeaders(tk)
+        return fetch(`${API_BASE}${url}`, { ...options, headers: retryHeaders })
+      }
+    }
+    return res
+  })
 }

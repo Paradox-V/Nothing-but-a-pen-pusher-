@@ -79,7 +79,7 @@ export function RssPanel() {
     } catch { setItems([]) } finally { setLoading(false) }
   }, [page, selectedFeed, keyword])
 
-  useEffect(() => { apiFetch("/rss/feeds").then((r) => r.json()).then(setFeeds).catch(() => {}) }, [])
+  useEffect(() => { apiFetch("/rss/feeds").then((r) => r.json()).then((d) => { if (Array.isArray(d)) setFeeds(d) }).catch(() => {}) }, [])
   useEffect(() => { fetchRss() }, [fetchRss])
 
   const addFeed = async () => {
@@ -92,7 +92,8 @@ export function RssPanel() {
       showToast("已添加，首次抓取将在下次调度周期执行")
       setNewFeedName(""); setNewFeedUrl("")
       const feedsRes = await apiFetch("/rss/feeds")
-      setFeeds(await feedsRes.json())
+      const feedsData = await feedsRes.json()
+      if (Array.isArray(feedsData)) setFeeds(feedsData)
     } catch { showToast("网络错误") }
   }
 
@@ -200,7 +201,8 @@ export function RssPanel() {
       const data = await res.json()
       showToast(`已订阅 ${data.success} 个，失败 ${data.failed} 个`)
       const feedsRes = await apiFetch("/rss/feeds")
-      setFeeds(await feedsRes.json())
+      const feedsData = await feedsRes.json()
+      if (Array.isArray(feedsData)) setFeeds(feedsData)
       setShowDiscover(false)
     } catch { showToast("批量订阅失败") }
   }

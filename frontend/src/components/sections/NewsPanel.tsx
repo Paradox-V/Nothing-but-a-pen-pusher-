@@ -99,9 +99,9 @@ export function NewsPanel() {
 
   useEffect(() => {
     // 后端 /api/news/categories 返回 [{category, count}]
-    apiFetch("/news/categories").then((r) => r.json()).then(setCategories).catch(() => {})
+    apiFetch("/news/categories").then((r) => r.json()).then((d) => { if (Array.isArray(d)) setCategories(d) }).catch(() => {})
     // 后端 /api/news/status 返回 { sources: string[], source_stats: {...} }
-    apiFetch("/news/status").then((r) => r.json()).then((d) => setSources(d.sources || [])).catch(() => {})
+    apiFetch("/news/status").then((r) => r.json()).then((d) => setSources(Array.isArray(d?.sources) ? d.sources : [])).catch(() => {})
   }, [])
 
   const toggleCategory = (c: string) =>
